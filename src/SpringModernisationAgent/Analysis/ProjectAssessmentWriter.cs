@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SpringModernisationAgent.Models;
 
 namespace SpringModernisationAgent.Analysis;
@@ -7,7 +8,11 @@ public sealed class ProjectAssessmentWriter
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        WriteIndented = true
+        WriteIndented = true,
+        Converters =
+        {
+            new JsonStringEnumConverter()
+        }
     };
 
     public async Task WriteAsync(

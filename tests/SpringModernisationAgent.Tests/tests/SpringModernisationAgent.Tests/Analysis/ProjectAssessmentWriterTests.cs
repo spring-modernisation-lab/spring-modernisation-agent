@@ -20,16 +20,27 @@ public class ProjectAssessmentWriterTests
         try
         {
             var assessment = new ProjectAssessment(
-                Organisation: "spring-modernisation-lab",
-                CreatedAt: new DateTimeOffset(
-                    2026, 10, 28,
-                    12, 0, 0,
-                    TimeSpan.Zero),
-                Repositories: [],
-                DependencyGraph:
-                    new RepositoryDependencyGraph(
-                        Repositories: [],
-                        Edges: []));
+            Organisation: "spring-modernisation-lab",
+            CreatedAt: new DateTimeOffset(
+                2026, 10, 28,
+                12, 0, 0,
+                TimeSpan.Zero),
+            Repositories: [],
+            DependencyGraph:
+                new RepositoryDependencyGraph(
+                    Repositories:
+                    [
+                        "customer-service",
+                        "platform-parent"
+                    ],
+                    Edges:
+                    [
+                        new RepositoryDependencyEdge(
+                            FromRepository: "customer-service",
+                            ToRepository: "platform-parent",
+                            Type: RepositoryDependencyType.Parent,
+                            Version: "1.0.0")
+                    ]));
 
             var writer = new ProjectAssessmentWriter();
 
@@ -55,12 +66,29 @@ public class ProjectAssessmentWriterTests
                 0,
                 root.GetProperty("Repositories").GetArrayLength());
 
+            var edges = root
+                .GetProperty("DependencyGraph")
+                .GetProperty("Edges");
+
+            Assert.Equal(1, edges.GetArrayLength());
+
+            var edge = edges[0];
+
             Assert.Equal(
-                0,
-                root
-                    .GetProperty("DependencyGraph")
-                    .GetProperty("Edges")
-                    .GetArrayLength());
+                "customer-service",
+                edge.GetProperty("FromRepository").GetString());
+
+            Assert.Equal(
+                "platform-parent",
+                edge.GetProperty("ToRepository").GetString());
+
+            Assert.Equal(
+                "Parent",
+                edge.GetProperty("Type").GetString());
+
+            Assert.Equal(
+                "1.0.0",
+                edge.GetProperty("Version").GetString());
         }
         finally
         {
