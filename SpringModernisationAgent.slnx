@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SpringModernisationAgent/SpringModernisationAgent.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SpringModernisationAgent.Tests/SpringModernisationAgent.Tests.csproj" />
+  </Folder>
+</Solution>
