@@ -40,7 +40,8 @@ public class ProjectAssessmentWriterTests
                             ToRepository: "platform-parent",
                             Type: RepositoryDependencyType.Parent,
                             Version: "1.0.0")
-                    ]));
+                        ]),
+                    MigrationWaves: new MigrationWavePlan(Waves: []));
 
             var writer = new ProjectAssessmentWriter();
 

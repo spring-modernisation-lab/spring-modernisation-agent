@@ -9,6 +9,12 @@
 
   <ItemGroup>
     <PackageReference Include="Octokit" Version="14.0.0" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
+<ItemGroup>
+  <Content Include="Config\spring.yaml">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </Content>
+</ItemGroup>
 </Project>

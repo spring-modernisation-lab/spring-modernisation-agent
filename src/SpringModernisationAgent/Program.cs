@@ -1,4 +1,5 @@
 ﻿using SpringModernisationAgent.Analysis;
+using SpringModernisationAgent.Config;
 using SpringModernisationAgent.GitHub;
 using SpringModernisationAgent.Maven;
 using SpringModernisationAgent.Models;
@@ -89,8 +90,12 @@ var springAnalyzer =
 var assessments =
     new List<RepositoryAssessment>();
 
+var repositoryClassifier = new RepositoryClassifier();
+
 foreach (var inventory in inventories)
 {
+    var kind = repositoryClassifier.Classify(inventory.MavenProject);
+
     var spring =
         springAnalyzer.Analyze(
             inventory,
@@ -126,11 +131,12 @@ foreach (var inventory in inventories)
 
     assessments.Add(
         new RepositoryAssessment(
-            inventory.RepositoryName,
-            inventory.MavenProject,
-            spring,
-            internalEdges,
-            externalDependencies));
+            RepositoryName: inventory.RepositoryName,
+            Kind: kind,
+            MavenProject: inventory.MavenProject,
+            Spring: spring,
+            InternalDependencies: internalEdges,
+            ExternalDependencies: externalDependencies));
 }
 
 Console.WriteLine();
@@ -180,27 +186,35 @@ foreach (var assessment in
     }
 }
 
-var assessmentBuilder =
-    new ProjectAssessmentBuilder();
+var migrationWaveBuilder = new MigrationWaveBuilder();
 
-var projectAssessment =
-    assessmentBuilder.Build(
-        organisation,
-        assessments,
-        graph);
+var assessmentBuilder = new ProjectAssessmentBuilder(
+    migrationWaveBuilder);
 
-Console.WriteLine();
-Console.WriteLine("Project assessment");
-Console.WriteLine("==================");
-Console.WriteLine(
-    $"Organisation: {projectAssessment.Organisation}");
-Console.WriteLine(
-    $"Repositories: {projectAssessment.Repositories.Count}");
-Console.WriteLine(
-    $"Dependencies: {projectAssessment.DependencyGraph.Edges.Count}");
+var projectAssessment = assessmentBuilder.Build(
+    organisation,
+    assessments,
+    graph);
 
-var assessmentWriter =
-    new ProjectAssessmentWriter();
+// Load the approved Spring migration policy.
+var policyPath = Path.Combine(
+    AppContext.BaseDirectory,
+    "Config",
+    "spring.yaml");
+
+var policyLoader = new SpringMigrationPolicyLoader();
+var policy = policyLoader.Load(policyPath);
+
+// Apply approved migration routes to each repository.
+var routeSelector = new MigrationRouteSelector();
+var policyAssessment = new MigrationPolicyAssessment(routeSelector);
+
+projectAssessment = policyAssessment.Apply(
+    projectAssessment,
+    policy);
+
+// Write the finished assessment.
+var assessmentWriter = new ProjectAssessmentWriter();
 
 var outputPath = Path.Combine(
     Directory.GetCurrentDirectory(),
@@ -212,5 +226,4 @@ await assessmentWriter.WriteAsync(
     outputPath);
 
 Console.WriteLine();
-Console.WriteLine("Project assessment written to:");
-Console.WriteLine(outputPath);
+Console.WriteLine($"Project assessment written to: {outputPath}");

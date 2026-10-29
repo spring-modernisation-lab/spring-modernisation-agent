@@ -4,6 +4,13 @@ namespace SpringModernisationAgent.Analysis;
 
 public sealed class ProjectAssessmentBuilder
 {
+    private readonly MigrationWaveBuilder _migrationWaveBuilder;
+
+    public ProjectAssessmentBuilder(MigrationWaveBuilder migrationWaveBuilder)
+    {
+        _migrationWaveBuilder = migrationWaveBuilder;
+    }
+
     public ProjectAssessment Build(
         string organisation,
         IReadOnlyList<RepositoryAssessment> repositories,
@@ -13,12 +20,15 @@ public sealed class ProjectAssessmentBuilder
         ArgumentNullException.ThrowIfNull(repositories);
         ArgumentNullException.ThrowIfNull(dependencyGraph);
 
+        var migrationWaves = _migrationWaveBuilder.Build(dependencyGraph);
+
         return new ProjectAssessment(
             Organisation: organisation,
             CreatedAt: DateTimeOffset.UtcNow,
             Repositories: repositories
                 .OrderBy(repository => repository.RepositoryName)
                 .ToList(),
-            DependencyGraph: dependencyGraph);
+            DependencyGraph: dependencyGraph,
+            MigrationWaves: migrationWaves);
     }
 }

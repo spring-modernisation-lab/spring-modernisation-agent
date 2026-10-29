@@ -34,6 +34,7 @@ public class ProjectAssessmentSerializationTests
 
         var repositoryAssessment = new RepositoryAssessment(
             RepositoryName: "customer-service",
+            Kind: RepositoryKind.SpringBootApplication,
             MavenProject: mavenProject,
             Spring: new SpringPlatform(
                 SpringBootVersion: "2.7.18",
@@ -77,7 +78,8 @@ public class ProjectAssessmentSerializationTests
             [
                 repositoryAssessment
             ],
-            DependencyGraph: graph);
+            DependencyGraph: graph,
+            MigrationWaves: new MigrationWavePlan([]));
 
         var options = new JsonSerializerOptions
         {

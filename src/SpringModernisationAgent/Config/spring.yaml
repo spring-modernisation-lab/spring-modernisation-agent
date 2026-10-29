@@ -1,0 +1,85 @@
+routes:
+  - id: spring-boot-application-2.7-to-3
+
+    source:
+      repositoryKinds:
+        - SpringBootApplication
+
+      springBootMinimum: "2.7.0"
+      springBootMaximum: "2.7.x"
+
+    target:
+      springBoot: "3.5.x"
+      java: "21"
+
+    openRewrite:
+      recipe: "<APPROVED_APPLICATION_RECIPE>"
+      artifact: "<APPROVED_ARTIFACT>"
+      version: "<PINNED_VERSION>"
+
+    requirements:
+      buildSystems:
+        - maven
+
+      baselineBuildMustPass: true
+
+    validation:
+      - compile
+      - unit-tests
+      - application-context-test
+
+  - id: spring-library-2.7-to-3
+
+    source:
+      repositoryKinds:
+        - JavaLibrary
+
+      springBootMinimum: "2.7.0"
+      springBootMaximum: "2.7.x"
+
+    target:
+      springBoot: "3.5.x"
+      java: "21"
+
+    openRewrite:
+      recipe: "<APPROVED_LIBRARY_RECIPE>"
+      artifact: "<APPROVED_ARTIFACT>"
+      version: "<PINNED_VERSION>"
+
+    requirements:
+      buildSystems:
+        - maven
+
+      baselineBuildMustPass: true
+
+    validation:
+      - compile
+      - unit-tests
+
+  - id: spring-parent-2.7-to-3
+
+    source:
+      repositoryKinds:
+        - ParentPom
+
+      springBootMinimum: "2.7.0"
+      springBootMaximum: "2.7.x"
+
+    target:
+      springBoot: "3.5.x"
+      java: "21"
+
+    openRewrite:
+      recipe: "<APPROVED_PARENT_RECIPE>"
+      artifact: "<APPROVED_ARTIFACT>"
+      version: "<PINNED_VERSION>"
+
+    requirements:
+      buildSystems:
+        - maven
+
+      baselineBuildMustPass: true
+
+    validation:
+      - effective-pom
+      - dependency-resolution

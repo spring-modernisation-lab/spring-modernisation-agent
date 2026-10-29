@@ -25,14 +25,12 @@ public class ProjectAssessmentBuilderTests
 
         var repositoryAssessment = new RepositoryAssessment(
             RepositoryName: "customer-service",
+            Kind: RepositoryKind.SpringBootApplication,
             MavenProject: mavenProject,
             Spring: new SpringPlatform(
                 SpringBootVersion: "2.7.18",
                 JavaVersion: "11",
-                Starters:
-                [
-                    "spring-boot-starter-web"
-                ]),
+                Starters: ["spring-boot-starter-web"]),
             InternalDependencies: [],
             ExternalDependencies: []);
 
@@ -43,7 +41,7 @@ public class ProjectAssessmentBuilderTests
             ],
             Edges: []);
 
-        var builder = new ProjectAssessmentBuilder();
+        var builder = new ProjectAssessmentBuilder(new MigrationWaveBuilder());
 
         var result = builder.Build(
             organisation: "spring-modernisation-lab",
@@ -83,6 +81,7 @@ public class ProjectAssessmentBuilderTests
         {
             return new RepositoryAssessment(
                 RepositoryName: name,
+                Kind: RepositoryKind.JavaLibrary,
                 MavenProject: new MavenProject(
                     Coordinate: new MavenCoordinate(
                         "com.example",
@@ -109,7 +108,7 @@ public class ProjectAssessmentBuilderTests
             ],
             Edges: []);
 
-        var builder = new ProjectAssessmentBuilder();
+        var builder = new ProjectAssessmentBuilder(new MigrationWaveBuilder());
 
         var result = builder.Build(
             "spring-modernisation-lab",
