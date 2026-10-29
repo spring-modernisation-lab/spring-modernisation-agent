@@ -1,0 +1,72 @@
+name: Portfolio Baseline Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline-build:
+    name: Baseline build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Java 11
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      # -------------------------
+      # Wave 1 - Parent POM
+      # -------------------------
+
+      - name: Checkout platform-parent
+        uses: actions/checkout@v6
+        with:
+          repository: spring-modernisation-lab/platform-parent
+          path: repositories/platform-parent
+
+      - name: Build and install platform-parent
+        working-directory: repositories/platform-parent
+        run: mvn --batch-mode clean install
+
+      # -------------------------
+      # Wave 2 - Shared libraries
+      # -------------------------
+
+      - name: Checkout shared-security
+        uses: actions/checkout@v6
+        with:
+          repository: spring-modernisation-lab/shared-security
+          path: repositories/shared-security
+
+      - name: Build and install shared-security
+        working-directory: repositories/shared-security
+        run: mvn --batch-mode clean install
+
+      # -------------------------
+      # Wave 3 - Applications
+      # -------------------------
+
+      - name: Checkout account-service
+        uses: actions/checkout@v6
+        with:
+          repository: spring-modernisation-lab/account-service
+          path: repositories/account-service
+
+      - name: Baseline build account-service
+        working-directory: repositories/account-service
+        run: mvn --batch-mode clean verify
+
+      - name: Checkout customer-service
+        uses: actions/checkout@v6
+        with:
+          repository: spring-modernisation-lab/customer-service
+          path: repositories/customer-service
+
+      - name: Baseline build customer-service
+        working-directory: repositories/customer-service
+        run: mvn --batch-mode clean verify
