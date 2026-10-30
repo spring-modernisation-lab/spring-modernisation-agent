@@ -11,6 +11,7 @@ public class DependencyGraphBuilderTests
     {
         var platformParent = new RepositoryInventory(
             "platform-parent",
+            "abc1234",
             new MavenProject(
                 new MavenCoordinate(
                     "com.example.platform",
@@ -27,6 +28,7 @@ public class DependencyGraphBuilderTests
 
         var sharedSecurity = new RepositoryInventory(
             "shared-security",
+            "abc1234",
             new MavenProject(
                 new MavenCoordinate(
                     "com.example.platform",
@@ -43,6 +45,7 @@ public class DependencyGraphBuilderTests
 
         var customerService = new RepositoryInventory(
             "customer-service",
+            "abc1234",
             new MavenProject(
                 new MavenCoordinate(
                     "com.example.services",
@@ -105,6 +108,7 @@ public class DependencyGraphBuilderTests
     {
         var customerService = new RepositoryInventory(
             "customer-service",
+            "abc1234",
             new MavenProject(
                 new MavenCoordinate(
                     "com.example.services",

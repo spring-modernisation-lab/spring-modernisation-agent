@@ -28,10 +28,16 @@ var inventories =
 
 foreach (var repository in repositories.OrderBy(r => r.Name))
 {
+    var commitSha = await provider.GetCommitShaAsync(
+        organisation,
+        repository.Name,
+        repository.DefaultBranch);
+
     var pom = await provider.GetFileContentAsync(
         organisation,
         repository.Name,
-        "pom.xml");
+        "pom.xml",
+        commitSha);
 
     if (pom is null)
     {
@@ -47,8 +53,9 @@ foreach (var repository in repositories.OrderBy(r => r.Name))
 
         inventories.Add(
             new RepositoryInventory(
-                repository.Name,
-                project));
+                RepositoryName: repository.Name,
+                CommitSha: commitSha,
+                MavenProject: project));
     }
     catch (Exception exception)
     {
@@ -132,6 +139,7 @@ foreach (var inventory in inventories)
     assessments.Add(
         new RepositoryAssessment(
             RepositoryName: inventory.RepositoryName,
+            CommitSha: inventory.CommitSha,
             Kind: kind,
             MavenProject: inventory.MavenProject,
             Spring: spring,
@@ -212,6 +220,71 @@ var policyAssessment = new MigrationPolicyAssessment(routeSelector);
 projectAssessment = policyAssessment.Apply(
     projectAssessment,
     policy);
+
+var baselineResultsPath = Path.Combine(
+    Directory.GetCurrentDirectory(),
+    "Artifacts",
+    "baseline-build-results.json");
+
+if (File.Exists(baselineResultsPath))
+{
+    var resultsReader = new PortfolioBaselineBuildResultsReader();
+
+    var baselineBuildResults = await resultsReader.ReadAsync(
+        baselineResultsPath);
+
+    var baselineBuildValidator = new BaselineBuildValidator();
+    var commitProvenanceValidator = new CommitProvenanceValidator();
+
+    var baselineBuildAssessment = new BaselineBuildAssessment(
+        baselineBuildValidator,
+        commitProvenanceValidator);
+
+    projectAssessment = baselineBuildAssessment.Apply(
+        projectAssessment,
+        baselineBuildResults);
+}
+
+var readinessEvaluator = new MigrationReadinessEvaluator();
+
+var repositoriesWithReadiness = projectAssessment.Repositories
+    .Select(repository => repository with
+    {
+        MigrationReadiness = readinessEvaluator.Evaluate(repository)
+    })
+    .ToList();
+
+projectAssessment = projectAssessment with
+{
+    Repositories = repositoriesWithReadiness
+};
+
+var transformationPlanBuilder = new TransformationPlanBuilder();
+
+var transformationPlans = projectAssessment.Repositories
+    .Where(repository =>
+        repository.MigrationReadiness?.CanProceed == true)
+    .Select(repository =>
+        transformationPlanBuilder.Build(
+            repository,
+            projectAssessment.MigrationWaves))
+    .OrderBy(plan => plan.MigrationWave)
+    .ThenBy(plan => plan.RepositoryName)
+    .ToList();
+
+var transformationPlansWriter = new TransformationPlansWriter();
+
+var transformationPlansPath = Path.Combine(
+    Directory.GetCurrentDirectory(),
+    "Artifacts",
+    "transformation-plans.json");
+
+await transformationPlansWriter.WriteAsync(
+    transformationPlans,
+    transformationPlansPath);
+
+Console.WriteLine(
+    $"Transformation plans written to: {transformationPlansPath}");
 
 // Write the finished assessment.
 var assessmentWriter = new ProjectAssessmentWriter();

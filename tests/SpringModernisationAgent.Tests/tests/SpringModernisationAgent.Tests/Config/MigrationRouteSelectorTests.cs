@@ -125,9 +125,15 @@ public class MigrationRouteSelectorTests
 
             OpenRewrite = new OpenRewriteConfiguration
             {
-                Recipe = "<APPROVED_RECIPE>",
-                Artifact = "<APPROVED_ARTIFACT>",
-                Version = "<PINNED_VERSION>"
+                Recipes =
+                [
+                    new OpenRewriteRecipeConfiguration
+                    {
+                        Recipe = "<APPROVED_RECIPE>",
+                        Artifact = "<APPROVED_ARTIFACT>",
+                        Version = "<PINNED_VERSION>"
+                    }
+                ]
             },
 
             Requirements = new MigrationRequirements

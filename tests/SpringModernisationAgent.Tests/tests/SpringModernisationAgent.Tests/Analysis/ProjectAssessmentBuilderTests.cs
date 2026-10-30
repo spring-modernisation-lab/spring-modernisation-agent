@@ -25,6 +25,7 @@ public class ProjectAssessmentBuilderTests
 
         var repositoryAssessment = new RepositoryAssessment(
             RepositoryName: "customer-service",
+            CommitSha: "abc1234",
             Kind: RepositoryKind.SpringBootApplication,
             MavenProject: mavenProject,
             Spring: new SpringPlatform(
@@ -81,6 +82,7 @@ public class ProjectAssessmentBuilderTests
         {
             return new RepositoryAssessment(
                 RepositoryName: name,
+                CommitSha: "abc1234",
                 Kind: RepositoryKind.JavaLibrary,
                 MavenProject: new MavenProject(
                     Coordinate: new MavenCoordinate(

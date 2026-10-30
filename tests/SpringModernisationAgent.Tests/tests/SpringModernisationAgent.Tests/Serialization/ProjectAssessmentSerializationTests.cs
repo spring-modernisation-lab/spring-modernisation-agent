@@ -34,6 +34,7 @@ public class ProjectAssessmentSerializationTests
 
         var repositoryAssessment = new RepositoryAssessment(
             RepositoryName: "customer-service",
+            CommitSha: "abc1234",
             Kind: RepositoryKind.SpringBootApplication,
             MavenProject: mavenProject,
             Spring: new SpringPlatform(

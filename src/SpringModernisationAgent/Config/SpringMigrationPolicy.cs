@@ -40,6 +40,11 @@ public sealed class SpringTarget
 
 public sealed class OpenRewriteConfiguration
 {
+    public List<OpenRewriteRecipeConfiguration> Recipes { get; set; } = [];
+}
+
+public sealed class OpenRewriteRecipeConfiguration
+{
     public string Recipe { get; set; } = string.Empty;
 
     public string Artifact { get; set; } = string.Empty;

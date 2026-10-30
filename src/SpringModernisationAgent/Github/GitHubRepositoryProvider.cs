@@ -25,14 +25,16 @@ public sealed class GitHubRepositoryProvider
     public async Task<string?> GetFileContentAsync(
         string organisation,
         string repository,
-        string path)
+        string path,
+        string commitSha)
     {
         try
         {
-            var contents = await _client.Repository.Content.GetAllContents(
+            var contents = await _client.Repository.Content.GetAllContentsByRef(
                 organisation,
                 repository,
-                path);
+                path,
+                commitSha);
 
             var file = contents.SingleOrDefault();
 
@@ -47,5 +49,22 @@ public sealed class GitHubRepositoryProvider
         {
             return null;
         }
+    }
+
+    public async Task<string> GetCommitShaAsync(
+        string organisation,
+        string repository,
+        string branch)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(organisation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repository);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
+
+        var reference = await _client.Git.Reference.Get(
+            organisation,
+            repository,
+            $"heads/{branch}");
+
+        return reference.Object.Sha;
     }
 }

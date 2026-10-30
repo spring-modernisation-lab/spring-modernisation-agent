@@ -23,9 +23,13 @@ public class SpringMigrationPolicyLoaderTests
                   java: "21"
 
                 openRewrite:
-                  recipe: "<APPROVED_RECIPE>"
-                  artifact: "<APPROVED_ARTIFACT>"
-                  version: "<PINNED_VERSION>"
+                  recipes:
+                    - recipe: "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5"
+                      artifact: "org.openrewrite.recipe:rewrite-spring"
+                      version: "6.43.0"
+                    - recipe: "org.openrewrite.java.migrate.UpgradeToJava21"
+                      artifact: "org.openrewrite.recipe:rewrite-migrate-java"
+                      version: "3.47.0"
 
                 requirements:
                   buildSystems:
@@ -82,17 +86,32 @@ public class SpringMigrationPolicyLoaderTests
                 "21",
                 route.Target.Java);
 
-            Assert.Equal(
-                "<APPROVED_RECIPE>",
-                route.OpenRewrite.Recipe);
-
-            Assert.Equal(
-                "<APPROVED_ARTIFACT>",
-                route.OpenRewrite.Artifact);
-
-            Assert.Equal(
-                "<PINNED_VERSION>",
-                route.OpenRewrite.Version);
+            Assert.Collection(
+                route.OpenRewrite.Recipes,
+                recipe =>
+                {
+                    Assert.Equal(
+                        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5",
+                        recipe.Recipe);
+                    Assert.Equal(
+                        "org.openrewrite.recipe:rewrite-spring",
+                        recipe.Artifact);
+                    Assert.Equal(
+                        "6.43.0",
+                        recipe.Version);
+                },
+                recipe =>
+                {
+                    Assert.Equal(
+                        "org.openrewrite.java.migrate.UpgradeToJava21",
+                        recipe.Recipe);
+                    Assert.Equal(
+                        "org.openrewrite.recipe:rewrite-migrate-java",
+                        recipe.Artifact);
+                    Assert.Equal(
+                        "3.47.0",
+                        recipe.Version);
+                });
 
             Assert.Contains(
                 "maven",

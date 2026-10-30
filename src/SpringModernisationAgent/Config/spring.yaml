@@ -13,9 +13,14 @@ routes:
       java: "21"
 
     openRewrite:
-      recipe: "<APPROVED_APPLICATION_RECIPE>"
-      artifact: "<APPROVED_ARTIFACT>"
-      version: "<PINNED_VERSION>"
+      recipes:
+        - recipe: "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5"
+          artifact: "org.openrewrite.recipe:rewrite-spring"
+          version: "6.43.0"
+
+        - recipe: "org.openrewrite.java.migrate.UpgradeToJava21"
+          artifact: "org.openrewrite.recipe:rewrite-migrate-java"
+          version: "3.47.0"
 
     requirements:
       buildSystems:
@@ -42,9 +47,14 @@ routes:
       java: "21"
 
     openRewrite:
-      recipe: "<APPROVED_LIBRARY_RECIPE>"
-      artifact: "<APPROVED_ARTIFACT>"
-      version: "<PINNED_VERSION>"
+      recipes:
+        - recipe: "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5"
+          artifact: "org.openrewrite.recipe:rewrite-spring"
+          version: "6.43.0"
+
+        - recipe: "org.openrewrite.java.migrate.UpgradeToJava21"
+          artifact: "org.openrewrite.recipe:rewrite-migrate-java"
+          version: "3.47.0"
 
     requirements:
       buildSystems:
@@ -70,9 +80,14 @@ routes:
       java: "21"
 
     openRewrite:
-      recipe: "<APPROVED_PARENT_RECIPE>"
-      artifact: "<APPROVED_ARTIFACT>"
-      version: "<PINNED_VERSION>"
+      recipes:
+        - recipe: "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5"
+          artifact: "org.openrewrite.recipe:rewrite-spring"
+          version: "6.43.0"
+
+        - recipe: "org.openrewrite.java.migrate.UpgradeToJava21"
+          artifact: "org.openrewrite.recipe:rewrite-migrate-java"
+          version: "3.47.0"
 
     requirements:
       buildSystems:

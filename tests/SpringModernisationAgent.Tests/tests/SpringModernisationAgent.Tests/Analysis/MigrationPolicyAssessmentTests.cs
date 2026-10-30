@@ -96,6 +96,7 @@ public class MigrationPolicyAssessmentTests
     {
         return new RepositoryAssessment(
             RepositoryName: repositoryName,
+            CommitSha: "abc1234",
             Kind: RepositoryKind.SpringBootApplication,
             MavenProject: new MavenProject(
                 Coordinate: new MavenCoordinate(
@@ -140,9 +141,15 @@ public class MigrationPolicyAssessmentTests
                     },
                     OpenRewrite = new OpenRewriteConfiguration
                     {
-                        Recipe = "<APPROVED_RECIPE>",
-                        Artifact = "<APPROVED_ARTIFACT>",
-                        Version = "<PINNED_VERSION>"
+                        Recipes =
+                        [
+                            new OpenRewriteRecipeConfiguration
+                            {
+                                Recipe = "<APPROVED_RECIPE>",
+                                Artifact = "<APPROVED_ARTIFACT>",
+                                Version = "<PINNED_VERSION>"
+                            }
+                        ]
                     },
                     Requirements = new MigrationRequirements
                     {
