@@ -19,7 +19,7 @@ jobs:
           java-version: '11'
 
       # -------------------------
-      # Wave 1 - Parent POM
+      # Wave 1
       # -------------------------
 
       - name: Checkout platform-parent
@@ -28,12 +28,14 @@ jobs:
           repository: spring-modernisation-lab/platform-parent
           path: repositories/platform-parent
 
-      - name: Build and install platform-parent
+      - name: Build platform-parent
+        id: platform_parent
+        continue-on-error: true
         working-directory: repositories/platform-parent
         run: mvn --batch-mode clean install
 
       # -------------------------
-      # Wave 2 - Shared libraries
+      # Wave 2
       # -------------------------
 
       - name: Checkout shared-security
@@ -42,12 +44,14 @@ jobs:
           repository: spring-modernisation-lab/shared-security
           path: repositories/shared-security
 
-      - name: Build and install shared-security
+      - name: Build shared-security
+        id: shared_security
+        continue-on-error: true
         working-directory: repositories/shared-security
         run: mvn --batch-mode clean install
 
       # -------------------------
-      # Wave 3 - Applications
+      # Wave 3
       # -------------------------
 
       - name: Checkout account-service
@@ -56,7 +60,9 @@ jobs:
           repository: spring-modernisation-lab/account-service
           path: repositories/account-service
 
-      - name: Baseline build account-service
+      - name: Build account-service
+        id: account_service
+        continue-on-error: true
         working-directory: repositories/account-service
         run: mvn --batch-mode clean verify
 
@@ -66,6 +72,97 @@ jobs:
           repository: spring-modernisation-lab/customer-service
           path: repositories/customer-service
 
-      - name: Baseline build customer-service
+      - name: Build customer-service
+        id: customer_service
+        continue-on-error: true
         working-directory: repositories/customer-service
         run: mvn --batch-mode clean verify
+
+      # -------------------------
+      # Structured results
+      # -------------------------
+
+      - name: Create baseline build results
+        if: always()
+        env:
+          PLATFORM_PARENT: ${{ steps.platform_parent.outcome }}
+          SHARED_SECURITY: ${{ steps.shared_security.outcome }}
+          ACCOUNT_SERVICE: ${{ steps.account_service.outcome }}
+          CUSTOMER_SERVICE: ${{ steps.customer_service.outcome }}
+        run: |
+          mkdir -p artifacts
+
+          python3 <<'PY'
+          import json
+          import os
+
+          def status(value):
+              return "Passed" if value == "success" else "Failed"
+
+          result = {
+              "Repositories": [
+                  {
+                      "RepositoryName": "platform-parent",
+                      "Wave": 1,
+                      "Operation": "Install",
+                      "Status": status(os.environ["PLATFORM_PARENT"])
+                  },
+                  {
+                      "RepositoryName": "shared-security",
+                      "Wave": 2,
+                      "Operation": "Install",
+                      "Status": status(os.environ["SHARED_SECURITY"])
+                  },
+                  {
+                      "RepositoryName": "account-service",
+                      "Wave": 3,
+                      "Operation": "Verify",
+                      "Status": status(os.environ["ACCOUNT_SERVICE"])
+                  },
+                  {
+                      "RepositoryName": "customer-service",
+                      "Wave": 3,
+                      "Operation": "Verify",
+                      "Status": status(os.environ["CUSTOMER_SERVICE"])
+                  }
+              ]
+          }
+
+          with open(
+              "artifacts/baseline-build-results.json",
+              "w",
+              encoding="utf-8"
+          ) as output:
+              json.dump(result, output, indent=2)
+
+          print(json.dumps(result, indent=2))
+          PY
+
+      - name: Upload baseline build results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-build-results
+          path: artifacts/baseline-build-results.json
+          if-no-files-found: error
+
+      # -------------------------
+      # Fail the overall workflow
+      # after collecting evidence
+      # -------------------------
+
+      - name: Fail workflow if a baseline build failed
+        if: always()
+        env:
+          PLATFORM_PARENT: ${{ steps.platform_parent.outcome }}
+          SHARED_SECURITY: ${{ steps.shared_security.outcome }}
+          ACCOUNT_SERVICE: ${{ steps.account_service.outcome }}
+          CUSTOMER_SERVICE: ${{ steps.customer_service.outcome }}
+        run: |
+          if [ "$PLATFORM_PARENT" != "success" ] ||
+             [ "$SHARED_SECURITY" != "success" ] ||
+             [ "$ACCOUNT_SERVICE" != "success" ] ||
+             [ "$CUSTOMER_SERVICE" != "success" ]; then
+            echo "One or more baseline builds failed."
+            exit 1
+          fi
