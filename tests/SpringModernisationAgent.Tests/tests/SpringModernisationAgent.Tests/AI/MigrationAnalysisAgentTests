@@ -1,0 +1,355 @@
+using SpringModernisationAgent.AI;
+using SpringModernisationAgent.Models;
+
+namespace SpringModernisationAgent.Tests.AI;
+
+public class MigrationAnalysisAgentTests
+{
+    [Fact]
+    public async Task AnalyzeAsync_ValidResult_ReturnsAnalysis()
+    {
+        var expected = CreateValidResult();
+
+        var model = new FakeMigrationAnalysisModel
+        {
+            Result = expected
+        };
+
+        var agent = new MigrationAnalysisAgent(model);
+
+        var result = await agent.AnalyzeAsync(
+            CreateInput());
+
+        Assert.Same(expected, result);
+
+        Assert.NotNull(model.Prompt);
+
+        Assert.Contains(
+            "spring-modernisation-lab",
+            model.Prompt);
+
+        Assert.Contains(
+            "platform-parent",
+            model.Prompt);
+
+        Assert.Contains(
+            "customer-service",
+            model.Prompt);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_ChangedWaveNumber_ThrowsInvalidOperationException()
+    {
+        var result = CreateValidResult();
+
+        result = result with
+        {
+            Strategy = result.Strategy with
+            {
+                Waves =
+                [
+                    result.Strategy.Waves[0] with
+                    {
+                        Number = 99
+                    },
+
+                    result.Strategy.Waves[1]
+                ]
+            }
+        };
+
+        var agent = new MigrationAnalysisAgent(
+            new FakeMigrationAnalysisModel
+            {
+                Result = result
+            });
+
+        var exception =
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => agent.AnalyzeAsync(CreateInput()));
+
+        Assert.Contains(
+            "changed a migration wave number",
+            exception.Message);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_RepositoryMovedBetweenWaves_ThrowsInvalidOperationException()
+    {
+        var result = CreateValidResult();
+
+        result = result with
+        {
+            Strategy = result.Strategy with
+            {
+                Waves =
+                [
+                    result.Strategy.Waves[0] with
+                    {
+                        Repositories =
+                        [
+                            "customer-service"
+                        ]
+                    },
+
+                    result.Strategy.Waves[1] with
+                    {
+                        Repositories =
+                        [
+                            "platform-parent"
+                        ]
+                    }
+                ]
+            }
+        };
+
+        var agent = new MigrationAnalysisAgent(
+            new FakeMigrationAnalysisModel
+            {
+                Result = result
+            });
+
+        var exception =
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => agent.AnalyzeAsync(CreateInput()));
+
+        Assert.Contains(
+            "changed repository membership",
+            exception.Message);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_RepositoryRemoved_ThrowsInvalidOperationException()
+    {
+        var result = CreateValidResult();
+
+        result = result with
+        {
+            RepositoryAnalyses =
+            [
+                result.RepositoryAnalyses[0]
+            ]
+        };
+
+        var agent = new MigrationAnalysisAgent(
+            new FakeMigrationAnalysisModel
+            {
+                Result = result
+            });
+
+        var exception =
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => agent.AnalyzeAsync(CreateInput()));
+
+        Assert.Contains(
+            "added, removed or duplicated",
+            exception.Message);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_DuplicateRepositoryAnalysis_ThrowsInvalidOperationException()
+    {
+        var result = CreateValidResult();
+
+        var duplicate =
+            result.RepositoryAnalyses[0];
+
+        result = result with
+        {
+            RepositoryAnalyses =
+            [
+                duplicate,
+                duplicate
+            ]
+        };
+
+        var agent = new MigrationAnalysisAgent(
+            new FakeMigrationAnalysisModel
+            {
+                Result = result
+            });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => agent.AnalyzeAsync(CreateInput()));
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_PassesCancellationTokenToModel()
+    {
+        var model = new FakeMigrationAnalysisModel
+        {
+            Result = CreateValidResult()
+        };
+
+        var agent = new MigrationAnalysisAgent(model);
+
+        using var cancellationTokenSource =
+            new CancellationTokenSource();
+
+        var cancellationToken =
+            cancellationTokenSource.Token;
+
+        await agent.AnalyzeAsync(
+            CreateInput(),
+            cancellationToken);
+
+        Assert.Equal(
+            cancellationToken,
+            model.CancellationToken);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_NullInput_ThrowsArgumentNullException()
+    {
+        var agent = new MigrationAnalysisAgent(
+            new FakeMigrationAnalysisModel
+            {
+                Result = CreateValidResult()
+            });
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => agent.AnalyzeAsync(null!));
+    }
+
+    private static MigrationAnalysisInput CreateInput()
+    {
+        return new MigrationAnalysisInput(
+            Organisation: "spring-modernisation-lab",
+
+            Repositories:
+            [
+                CreateRepositoryInput(
+                    "platform-parent",
+                    "ParentPom"),
+
+                CreateRepositoryInput(
+                    "customer-service",
+                    "SpringBootApplication")
+            ],
+
+            Waves:
+            [
+                new MigrationAnalysisWaveInput(
+                    Number: 1,
+                    Repositories:
+                    [
+                        "platform-parent"
+                    ]),
+
+                new MigrationAnalysisWaveInput(
+                    Number: 2,
+                    Repositories:
+                    [
+                        "customer-service"
+                    ])
+            ]);
+    }
+
+    private static MigrationAnalysisRepositoryInput
+        CreateRepositoryInput(
+            string repositoryName,
+            string repositoryKind)
+    {
+        return new MigrationAnalysisRepositoryInput(
+            RepositoryName: repositoryName,
+            CommitSha:
+                "078718f4100ea1340e9a175c13c50bbf71806ae3",
+            RepositoryKind: repositoryKind,
+            SpringBootVersion: "2.7.18",
+            JavaVersion: "11",
+
+            Target: new MigrationAnalysisTargetInput(
+                SpringBootVersion: "3.5.x",
+                JavaVersion: "21"),
+
+            MigrationRouteId:
+                "spring-boot-application-2.7-to-3",
+
+            InternalDependencies: [],
+
+            ReadinessStatus: "Ready",
+
+            ReadinessReasons: [],
+
+            Transformation: null);
+    }
+
+    private static MigrationAnalysisResult CreateValidResult()
+    {
+        return new MigrationAnalysisResult(
+            Strategy: new MigrationStrategy(
+                Summary:
+                    "Migrate shared components before dependent applications.",
+
+                Waves:
+                [
+                    new MigrationStrategyWave(
+                        Number: 1,
+                        Repositories:
+                        [
+                            "platform-parent"
+                        ],
+                        Objective:
+                            "Modernise the shared parent.",
+                        Rationale:
+                            "Dependent repositories inherit from it."),
+
+                    new MigrationStrategyWave(
+                        Number: 2,
+                        Repositories:
+                        [
+                            "customer-service"
+                        ],
+                        Objective:
+                            "Modernise the application.",
+                        Rationale:
+                            "The upstream platform migration is completed first.")
+                ],
+
+                KeyRisks: [],
+
+                Recommendations: []),
+
+            RepositoryAnalyses:
+            [
+                new MigrationAnalysis(
+                    RepositoryName:
+                        "platform-parent",
+                    Summary:
+                        "Shared parent migration.",
+                    Findings: [],
+                    RecommendedActions: []),
+
+                new MigrationAnalysis(
+                    RepositoryName:
+                        "customer-service",
+                    Summary:
+                        "Application migration.",
+                    Findings: [],
+                    RecommendedActions: [])
+            ]);
+    }
+
+    private sealed class FakeMigrationAnalysisModel
+        : IMigrationAnalysisModel
+    {
+        public MigrationAnalysisResult? Result { get; set; }
+
+        public string? Prompt { get; private set; }
+
+        public CancellationToken CancellationToken { get; private set; }
+
+        public Task<MigrationAnalysisResult> AnalyzeAsync(
+            string prompt,
+            CancellationToken cancellationToken = default)
+        {
+            Prompt = prompt;
+            CancellationToken = cancellationToken;
+
+            return Task.FromResult(
+                Result
+                ?? throw new InvalidOperationException(
+                    "No fake migration analysis result was configured."));
+        }
+    }
+}
