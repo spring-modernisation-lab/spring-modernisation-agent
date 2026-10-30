@@ -4,6 +4,14 @@ namespace SpringModernisationAgent.Analysis;
 
 public sealed class TransformationPlanBuilder
 {
+    private readonly OpenRewriteConfigurationValidator _openRewriteValidator;
+
+    public TransformationPlanBuilder(
+        OpenRewriteConfigurationValidator openRewriteValidator)
+    {
+        _openRewriteValidator = openRewriteValidator;
+    }
+
     public TransformationPlan Build(
         RepositoryAssessment repository,
         MigrationWavePlan migrationWaves)
@@ -16,6 +24,8 @@ public sealed class TransformationPlanBuilder
         var route = repository.MigrationRoute?.Route
             ?? throw new InvalidOperationException(
                 $"Repository '{repository.RepositoryName}' has no approved migration route.");
+
+        _openRewriteValidator.Validate(route.OpenRewrite);
 
         if (string.IsNullOrWhiteSpace(repository.CommitSha))
         {

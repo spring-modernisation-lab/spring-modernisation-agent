@@ -3,6 +3,7 @@ using SpringModernisationAgent.Config;
 using SpringModernisationAgent.GitHub;
 using SpringModernisationAgent.Maven;
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Transformation;
 
 var token =
     Environment.GetEnvironmentVariable("GITHUB_TOKEN")
@@ -259,7 +260,11 @@ projectAssessment = projectAssessment with
     Repositories = repositoriesWithReadiness
 };
 
-var transformationPlanBuilder = new TransformationPlanBuilder();
+var openRewriteValidator =
+    new OpenRewriteConfigurationValidator();
+
+var transformationPlanBuilder = new TransformationPlanBuilder(
+    openRewriteValidator);
 
 var transformationPlans = projectAssessment.Repositories
     .Where(repository =>
@@ -271,6 +276,8 @@ var transformationPlans = projectAssessment.Repositories
     .OrderBy(plan => plan.MigrationWave)
     .ThenBy(plan => plan.RepositoryName)
     .ToList();
+
+var executionPlanBuilder = new OpenRewriteExecutionPlanBuilder();
 
 var transformationPlansWriter = new TransformationPlansWriter();
 

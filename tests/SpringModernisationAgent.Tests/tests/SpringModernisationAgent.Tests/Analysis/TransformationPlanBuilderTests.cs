@@ -20,7 +20,11 @@ public class TransformationPlanBuilderTests
                 Repositories: ["customer-service"])
         ]);
 
-        var builder = new TransformationPlanBuilder();
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
 
         var result = builder.Build(repository, waves);
 
@@ -86,7 +90,11 @@ public class TransformationPlanBuilderTests
 
         var waves = CreateMigrationWaves();
 
-        var builder = new TransformationPlanBuilder();
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => builder.Build(repository, waves));
@@ -108,7 +116,11 @@ public class TransformationPlanBuilderTests
 
         var waves = CreateMigrationWaves();
 
-        var builder = new TransformationPlanBuilder();
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => builder.Build(repository, waves));
@@ -129,7 +141,11 @@ public class TransformationPlanBuilderTests
 
         var waves = CreateMigrationWaves();
 
-        var builder = new TransformationPlanBuilder();
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => builder.Build(repository, waves));
@@ -150,7 +166,11 @@ public class TransformationPlanBuilderTests
 
         var waves = CreateMigrationWaves();
 
-        var builder = new TransformationPlanBuilder();
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => builder.Build(repository, waves));
@@ -173,7 +193,11 @@ public class TransformationPlanBuilderTests
                 Repositories: ["platform-parent"])
         ]);
 
-        var builder = new TransformationPlanBuilder();
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => builder.Build(repository, waves));
@@ -200,13 +224,44 @@ public class TransformationPlanBuilderTests
                 Repositories: ["customer-service"])
         ]);
 
-        var builder = new TransformationPlanBuilder();
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => builder.Build(repository, waves));
 
         Assert.Contains(
             "belongs to multiple migration waves",
+            exception.Message);
+    }
+
+    [Fact]
+    public void Build_InvalidOpenRewriteConfiguration_ThrowsInvalidOperationException()
+    {
+        var repository = CreateRepositoryAssessment(
+            readiness: Ready());
+
+        repository.MigrationRoute!.Route!.OpenRewrite.Recipes[0].Version =
+            string.Empty;
+
+        var waves = CreateMigrationWaves();
+
+        var openRewriteValidator =
+            new OpenRewriteConfigurationValidator();
+
+        var builder = new TransformationPlanBuilder(
+            openRewriteValidator);
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => builder.Build(
+                repository,
+                waves));
+
+        Assert.Equal(
+            "OpenRewrite recipe 1 has no pinned version.",
             exception.Message);
     }
 
