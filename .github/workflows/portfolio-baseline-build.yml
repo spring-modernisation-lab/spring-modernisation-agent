@@ -28,6 +28,11 @@ jobs:
           repository: spring-modernisation-lab/platform-parent
           path: repositories/platform-parent
 
+      - name: Capture platform-parent commit
+        id: platform_parent_commit
+        working-directory: repositories/platform-parent
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  
       - name: Build platform-parent
         id: platform_parent
         continue-on-error: true
@@ -43,7 +48,12 @@ jobs:
         with:
           repository: spring-modernisation-lab/shared-security
           path: repositories/shared-security
-
+      
+      - name: Capture shared-security commit
+        id: shared_security_commit
+        working-directory: repositories/shared-security
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  
       - name: Build shared-security
         id: shared_security
         continue-on-error: true
@@ -65,13 +75,23 @@ jobs:
         continue-on-error: true
         working-directory: repositories/account-service
         run: mvn --batch-mode clean verify
-
+        
+      - name: Capture account-service commit
+        id: account_service_commit
+        working-directory: repositories/account-service
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        
       - name: Checkout customer-service
         uses: actions/checkout@v6
         with:
           repository: spring-modernisation-lab/customer-service
           path: repositories/customer-service
 
+      - name: Capture customer-service commit
+        id: customer_service_commit
+        working-directory: repositories/customer-service
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  
       - name: Build customer-service
         id: customer_service
         continue-on-error: true
@@ -86,9 +106,16 @@ jobs:
         if: always()
         env:
           PLATFORM_PARENT: ${{ steps.platform_parent.outcome }}
+          PLATFORM_PARENT_SHA: ${{ steps.platform_parent_commit.outputs.sha }}
+        
           SHARED_SECURITY: ${{ steps.shared_security.outcome }}
+          SHARED_SECURITY_SHA: ${{ steps.shared_security_commit.outputs.sha }}
+        
           ACCOUNT_SERVICE: ${{ steps.account_service.outcome }}
+          ACCOUNT_SERVICE_SHA: ${{ steps.account_service_commit.outputs.sha }}
+        
           CUSTOMER_SERVICE: ${{ steps.customer_service.outcome }}
+          CUSTOMER_SERVICE_SHA: ${{ steps.customer_service_commit.outputs.sha }}
         run: |
           mkdir -p artifacts
 
@@ -103,24 +130,28 @@ jobs:
               "Repositories": [
                   {
                       "RepositoryName": "platform-parent",
+                      "CommitSha": os.environ["PLATFORM_PARENT_SHA"],
                       "Wave": 1,
                       "Operation": "Install",
                       "Status": status(os.environ["PLATFORM_PARENT"])
                   },
                   {
                       "RepositoryName": "shared-security",
+                      "CommitSha": os.environ["SHARED_SECURITY_SHA"],
                       "Wave": 2,
                       "Operation": "Install",
                       "Status": status(os.environ["SHARED_SECURITY"])
                   },
                   {
                       "RepositoryName": "account-service",
+                      "CommitSha": os.environ["ACCOUNT_SERVICE_SHA"],
                       "Wave": 3,
                       "Operation": "Verify",
                       "Status": status(os.environ["ACCOUNT_SERVICE"])
                   },
                   {
                       "RepositoryName": "customer-service",
+                      "CommitSha": os.environ["CUSTOMER_SERVICE_SHA"],
                       "Wave": 3,
                       "Operation": "Verify",
                       "Status": status(os.environ["CUSTOMER_SERVICE"])
