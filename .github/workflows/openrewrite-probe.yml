@@ -1,0 +1,162 @@
+name: OpenRewrite probe
+
+# Discovery tool for the demo: runs the pinned OpenRewrite recipes for one
+# approved route against one repository, then builds the result. The aim is
+# to find out which upgrade problems the deterministic recipes leave behind.
+# It never pushes or changes the target repository.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Repository in the organisation to probe
+        required: true
+        default: orders-service
+      route:
+        description: Migration route id from Config/spring.yaml
+        required: true
+        default: spring-boot-application-2.7-to-3
+
+permissions:
+  contents: read
+
+env:
+  GITHUB_ORGANISATION: spring-modernisation-lab
+  OPENREWRITE_MAVEN_PLUGIN_VERSION: "6.25.0"
+  POLICY_PATH: agent/src/SpringModernisationAgent/Config/spring.yaml
+  OUTPUT_DIR: ${{ github.workspace }}/probe-output
+
+jobs:
+  probe:
+    name: Probe ${{ inputs.repository }} (${{ inputs.route }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout migration application (policy source)
+        uses: actions/checkout@v6
+        with:
+          path: agent
+
+      - name: Checkout target repository
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.GITHUB_ORGANISATION }}/${{ inputs.repository }}
+          token: ${{ secrets.MIGRATION_GITHUB_TOKEN }}
+          path: repo
+
+      - name: Record source commit
+        working-directory: repo
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          git rev-parse HEAD | tee "$OUTPUT_DIR/source-commit.txt"
+
+      - name: Set up Java 11 (baseline)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "11"
+          cache: maven
+
+      - name: Baseline build (must pass before migration)
+        working-directory: repo
+        run: |
+          set -o pipefail
+          mvn --batch-mode verify 2>&1 | tee "$OUTPUT_DIR/baseline-build.log"
+          mvn --batch-mode --quiet clean
+
+      - name: Set up Java 21 (target)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run pinned OpenRewrite recipes for the route
+        working-directory: repo
+        env:
+          ROUTE: ${{ inputs.route }}
+        run: |
+          set -euo pipefail
+
+          recipes=$(yq -o=json \
+            '.routes[] | select(.id == strenv(ROUTE)) | .openRewrite.recipes' \
+            "$GITHUB_WORKSPACE/$POLICY_PATH")
+
+          if [ -z "$recipes" ] || [ "$recipes" = "null" ]; then
+            echo "Route '$ROUTE' was not found in $POLICY_PATH"
+            exit 1
+          fi
+
+          echo "$recipes" | tee "$OUTPUT_DIR/recipes.json"
+
+          mapfile -t entries < <(echo "$recipes" | jq -c '.[]')
+
+          for entry in "${entries[@]}"; do
+            recipe=$(echo "$entry" | jq -r '.recipe')
+            artifact=$(echo "$entry" | jq -r '.artifact')
+            version=$(echo "$entry" | jq -r '.version')
+
+            echo "::group::$recipe ($artifact:$version)"
+            mvn --batch-mode \
+              "org.openrewrite.maven:rewrite-maven-plugin:${OPENREWRITE_MAVEN_PLUGIN_VERSION}:run" \
+              "-Drewrite.activeRecipes=${recipe}" \
+              "-Drewrite.recipeArtifactCoordinates=${artifact}:${version}" \
+              2>&1 | tee -a "$OUTPUT_DIR/openrewrite.log"
+            echo "::endgroup::"
+          done
+
+      - name: Capture OpenRewrite changes
+        working-directory: repo
+        run: |
+          git add -A
+          git diff --cached --stat | tee "$OUTPUT_DIR/openrewrite-diffstat.txt"
+          git diff --cached --binary > "$OUTPUT_DIR/openrewrite.patch"
+
+      - name: Post-migration build
+        id: post_migration
+        working-directory: repo
+        run: |
+          set +e
+          set -o pipefail
+          mvn --batch-mode verify 2>&1 | tee "$OUTPUT_DIR/post-migration-build.log"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+          if [ -d target/surefire-reports ]; then
+            cp -r target/surefire-reports "$OUTPUT_DIR/surefire-reports"
+          fi
+
+          # A failed build is the expected finding, not a probe failure.
+          exit 0
+
+      - name: Summarise findings
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.post_migration.outputs.exit_code }}
+        run: |
+          {
+            echo "## OpenRewrite probe: ${{ inputs.repository }}"
+            echo
+            echo "- Route: \`${{ inputs.route }}\`"
+            echo "- Source commit: \`$(cat "$OUTPUT_DIR/source-commit.txt" 2>/dev/null)\`"
+            echo "- Post-migration build exit code: \`${EXIT_CODE:-not run}\`"
+            echo
+            echo "### Files changed by OpenRewrite"
+            echo '```'
+            cat "$OUTPUT_DIR/openrewrite-diffstat.txt" 2>/dev/null || echo "(none)"
+            echo '```'
+            echo
+            echo "### Post-migration errors (first 80)"
+            echo '```'
+            grep -E '^\[ERROR\]' "$OUTPUT_DIR/post-migration-build.log" 2>/dev/null | head -80 || echo "(none)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: openrewrite-probe-${{ inputs.repository }}-${{ github.run_number }}
+          path: probe-output/
+          if-no-files-found: warn
