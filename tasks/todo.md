@@ -59,6 +59,8 @@ Put realistic upgrade traps into the demo app or apps, then **prove empirically*
 - [ ] **Fail closed on POM parse errors** (`AssessCommand.cs:82`): an unparseable repo must block, not vanish from the graph.
 - [ ] **Feed baseline evidence into `portfolio-transform.yml`.** Download or produce `baseline-build-results.json` before assess. Fix the `artifacts/` vs `Artifacts/` case mismatch (Linux paths are case-sensitive).
 - [ ] **Make the Strategy Agent non-blocking for transform.** An AI or auth failure must not stop deterministic migration. Assess still writes the deterministic artifacts, and the strategy outputs become optional in the workflow.
+- [x] Fix the pinned OpenRewrite versions; the probe showed `rewrite-spring:6.43.0` and `rewrite-migrate-java:3.47.0` don't exist on Maven Central. Now 6.37.1 / 3.42.1, with plugin 6.46.1.
+- [ ] Make the policy check fail when a pinned artifact doesn't exist (add a CI step that resolves each pinned recipe artifact). `OpenRewriteConfigurationValidator` currently only checks that a version is present.
 - [ ] Choose Foundry CI authentication: GitHub OIDC federated credential to Entra (workload identity, no long-lived secret).
 
 ## Phase 3: Preserve the transformed output

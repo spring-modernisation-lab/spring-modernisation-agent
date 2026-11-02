@@ -22,7 +22,7 @@ permissions:
 
 env:
   GITHUB_ORGANISATION: spring-modernisation-lab
-  OPENREWRITE_MAVEN_PLUGIN_VERSION: "6.25.0"
+  OPENREWRITE_MAVEN_PLUGIN_VERSION: "6.46.1"
   POLICY_PATH: agent/src/SpringModernisationAgent/Config/spring.yaml
   OUTPUT_DIR: ${{ github.workspace }}/probe-output
 
