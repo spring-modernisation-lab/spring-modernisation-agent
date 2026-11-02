@@ -14,6 +14,9 @@ public static class FoundryCredentialFactory
             FoundryAuthenticationMode.Development =>
                 new DefaultAzureCredential(),
 
+            FoundryAuthenticationMode.AzureCli =>
+                new AzureCliCredential(),
+
             FoundryAuthenticationMode.ManagedIdentity =>
                 CreateManagedIdentityCredential(
                     managedIdentityClientId),

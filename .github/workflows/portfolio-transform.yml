@@ -31,6 +31,12 @@ jobs:
 
     timeout-minutes: 30
 
+    permissions:
+      contents: read
+      # Lets the job request a short-lived GitHub OIDC token, which Azure
+      # exchanges for access to Foundry. No Azure secret is stored.
+      id-token: write
+
     steps:
       - name: Checkout migration application
         uses: actions/checkout@v6
@@ -61,17 +67,25 @@ jobs:
           name: baseline-build-results
           path: Artifacts
 
+      # The Strategy Agent is optional. Without AZURE_CLIENT_ID the login is
+      # skipped, FOUNDRY_PROJECT_ENDPOINT is left empty, and assess skips the
+      # AI stage. If the agent fails, assess still succeeds. Deterministic
+      # migration never depends on the AI stage.
+      - name: Sign in to Azure (GitHub OIDC)
+        if: vars.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Run portfolio assessment
         env:
           GITHUB_TOKEN: ${{ secrets.MIGRATION_GITHUB_TOKEN }}
 
-          FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
+          FOUNDRY_PROJECT_ENDPOINT: ${{ vars.AZURE_CLIENT_ID != '' && vars.FOUNDRY_PROJECT_ENDPOINT || '' }}
           FOUNDRY_MODEL: ${{ vars.FOUNDRY_MODEL }}
-
-          # Optional: when FOUNDRY_PROJECT_ENDPOINT is not configured the
-          # Strategy Agent is skipped, and if it fails assess still succeeds.
-          # Deterministic migration never depends on the AI stage.
-          FOUNDRY_AUTH_MODE: ${{ vars.FOUNDRY_AUTH_MODE }}
+          FOUNDRY_AUTH_MODE: AzureCli
         run: >
           dotnet run
           --project ./src/SpringModernisationAgent
@@ -86,6 +100,15 @@ jobs:
           test -f Artifacts/baseline-build-results.json
           test -f Artifacts/project-assessment.json
           test -f Artifacts/transformation-plans.json
+
+      - name: Report AI strategy outputs
+        shell: bash
+        run: |
+          if [ -f Artifacts/spring-modernisation-migration-strategy.docx ]; then
+            echo "AI migration strategy document produced."
+          else
+            echo "::warning title=No AI strategy document::The Strategy Agent was skipped or failed; see the 'Run portfolio assessment' log. Deterministic migration is unaffected."
+          fi
 
       - name: Upload assessment outputs
         uses: actions/upload-artifact@v5

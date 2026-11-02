@@ -63,8 +63,12 @@ Put realistic upgrade traps into the demo app or apps, then **prove empirically*
 - [ ] Make the policy check fail when a pinned artifact doesn't exist (add a CI step that resolves each pinned recipe artifact). `OpenRewriteConfigurationValidator` currently only checks that a version is present.
 - [x] **Verify end to end** (Spring modernisation run 7). Baseline: all 5 passed. Assess: all 5 Ready, waves 1 = `orders-service` + `platform-parent`, 2 = `shared-security`, 3 = `account-service` + `customer-service`; no `migration-analysis.json`, so the Strategy Agent was skipped or failed without blocking. Transform: the C# engine reproduced probe run 4 exactly (same SHA `b3986654`, both recipes, the same 7 files, `compile` failed). `platform-parent` didn't run because of stop-on-first-failure.
 - [x] **Within-wave rule changed:** `MigrationWaveExecutor` now runs every repository in the active wave (peers are independent) and returns every result; a failure still blocks the next wave via the planner. Previously the wave stopped at the first failure.
-- [ ] Re-run to confirm `platform-parent` now executes alongside the failing `orders-service`.
-- [ ] Choose Foundry CI authentication: GitHub OIDC federated credential to Entra (workload identity, no long-lived secret).
+- [x] Re-run to confirm `platform-parent` now executes alongside the failing `orders-service` (run 8). `orders-service` failed `compile` (same errors). **`platform-parent` passed:** OpenRewrite changed `pom.xml` **and `.github/workflows/baseline-build.yml`** (the Java 21 recipe also upgrades `setup-java` in CI), and `effective-pom` and `dependency-resolution` passed.
+- [ ] **Draft PR implication:** migrations can modify `.github/workflows/*`, so pushing the branch needs the token to also have **Workflows: Read and write**; otherwise GitHub rejects the push. The reviewer summary should call out CI-file changes explicitly.
+- [x] Choose Foundry CI authentication: GitHub OIDC federated credential to Entra. New `FoundryAuthenticationMode.AzureCli`; the assess job uses `azure/login@v2` with `id-token: write`. App `spring-modernisation-agent-ci` (appId `945c44c2-9524-4a6e-978e-1700c98dfa55`); federated subject `repo:spring-modernisation-lab/spring-modernisation-agent:ref:refs/heads/main`.
+- [ ] Grant **Azure AI User** on `spring-modernisation-pr-resource` to the CI service principal (user runs this).
+- [ ] Set repo variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_MODEL` (user).
+- [ ] Confirm the run produces `spring-modernisation-migration-strategy.docx` in the assessment artifact.
 
 ## Phase 3: Preserve the transformed output
 
