@@ -54,6 +54,10 @@ public sealed class MigrationWaveExecutor
         var results =
             new List<TransformationExecutionResult>();
 
+        // Repositories within one wave do not depend on each other, so every
+        // one is executed even if a peer fails. A failure still blocks the
+        // next wave: MigrationWaveExecutionPlanner treats a wave containing a
+        // failed result as Failed and returns no later wave.
         foreach (var plan in repositoriesToExecute)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -65,11 +69,6 @@ public sealed class MigrationWaveExecutor
                     cancellationToken);
 
             results.Add(result);
-
-            if (!result.Succeeded)
-            {
-                break;
-            }
         }
 
         return results;

@@ -230,8 +230,10 @@ public class MigrationWaveExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteNextWaveAsync_FirstRepositoryFails_StopsWave()
+    public async Task ExecuteNextWaveAsync_FirstRepositoryFails_StillExecutesRestOfWave()
     {
+        // Repositories in one wave do not depend on each other, so one
+        // failure must not hide the outcome of its independent peers.
         var firstPlan = CreatePlan(
             "repository-a",
             2);
@@ -258,25 +260,31 @@ public class MigrationWaveExecutorTests
             ],
             []);
 
-        var executionResult = Assert.Single(result);
+        Assert.Equal(
+            2,
+            result.Count);
 
         Assert.False(
-            executionResult.Succeeded);
+            result[0].Succeeded);
 
         Assert.Equal(
             "repository-a",
-            executionResult.Transformation.RepositoryName);
+            result[0].Transformation.RepositoryName);
 
-        var call = Assert.Single(
-            coordinator.Calls);
+        Assert.True(
+            result[1].Succeeded);
 
         Assert.Equal(
-            "repository-a",
-            call.Plan.RepositoryName);
+            [
+                "repository-a",
+                "repository-b"
+            ],
+            coordinator.Calls.Select(
+                call => call.Plan.RepositoryName));
     }
 
     [Fact]
-    public async Task ExecuteNextWaveAsync_SecondRepositoryFails_ReturnsCompletedAndFailedResults()
+    public async Task ExecuteNextWaveAsync_MiddleRepositoryFails_ReturnsResultsForWholeWaveInOrder()
     {
         var firstPlan = CreatePlan(
             "repository-a",
@@ -310,22 +318,64 @@ public class MigrationWaveExecutorTests
             []);
 
         Assert.Equal(
-            2,
-            result.Count);
-
-        Assert.True(
-            result[0].Succeeded);
-
-        Assert.False(
-            result[1].Succeeded);
-
-        Assert.Equal(
             [
                 "repository-a",
-                "repository-b"
+                "repository-b",
+                "repository-c"
             ],
-            coordinator.Calls.Select(
-                call => call.Plan.RepositoryName));
+            result.Select(
+                executionResult =>
+                    executionResult.Transformation.RepositoryName));
+
+        Assert.Equal(
+            [true, false, true],
+            result.Select(
+                executionResult => executionResult.Succeeded));
+    }
+
+    [Fact]
+    public async Task ExecuteNextWaveAsync_FailureInWave_BlocksNextWaveOnFollowingInvocation()
+    {
+        var failingPlan = CreatePlan(
+            "repository-a",
+            1);
+
+        var passingPlan = CreatePlan(
+            "repository-b",
+            1);
+
+        var laterPlan = CreatePlan(
+            "repository-c",
+            2);
+
+        var coordinator = new FakeExecutionCoordinator
+        {
+            ResultFactory = plan =>
+                plan.RepositoryName == "repository-a"
+                    ? CreateFailedResult(plan)
+                    : CreateSuccessfulResult(plan)
+        };
+
+        var executor = CreateExecutor(coordinator);
+
+        IReadOnlyList<TransformationPlan> plans =
+        [
+            failingPlan,
+            passingPlan,
+            laterPlan
+        ];
+
+        var firstRun = await executor.ExecuteNextWaveAsync(
+            "test-organisation",
+            plans,
+            []);
+
+        var secondRun = await executor.ExecuteNextWaveAsync(
+            "test-organisation",
+            plans,
+            firstRun);
+
+        Assert.Empty(secondRun);
 
         Assert.DoesNotContain(
             coordinator.Calls,

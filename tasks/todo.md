@@ -61,7 +61,9 @@ Put realistic upgrade traps into the demo app or apps, then **prove empirically*
 - [x] **Make the Strategy Agent non-blocking for transform.** Deterministic artifacts are written first. The AI stage is skipped when `FOUNDRY_PROJECT_ENDPOINT` is unset; if it fails, a warning is logged and assess continues. An AI or auth failure must not stop deterministic migration. Assess still writes the deterministic artifacts, and the strategy outputs become optional in the workflow.
 - [x] Fix the pinned OpenRewrite versions; the probe showed `rewrite-spring:6.43.0` and `rewrite-migrate-java:3.47.0` don't exist on Maven Central. Now 6.37.1 / 3.42.1, with plugin 6.46.1.
 - [ ] Make the policy check fail when a pinned artifact doesn't exist (add a CI step that resolves each pinned recipe artifact). `OpenRewriteConfigurationValidator` currently only checks that a version is present.
-- [ ] **Verify end to end:** run the `Spring modernisation` workflow. Expected: wave 1 = `orders-service` + `platform-parent`; `orders-service` fails `compile` with the same 12 errors as probe run 4, and the wave stops.
+- [x] **Verify end to end** (Spring modernisation run 7). Baseline: all 5 passed. Assess: all 5 Ready, waves 1 = `orders-service` + `platform-parent`, 2 = `shared-security`, 3 = `account-service` + `customer-service`; no `migration-analysis.json`, so the Strategy Agent was skipped or failed without blocking. Transform: the C# engine reproduced probe run 4 exactly (same SHA `b3986654`, both recipes, the same 7 files, `compile` failed). `platform-parent` didn't run because of stop-on-first-failure.
+- [x] **Within-wave rule changed:** `MigrationWaveExecutor` now runs every repository in the active wave (peers are independent) and returns every result; a failure still blocks the next wave via the planner. Previously the wave stopped at the first failure.
+- [ ] Re-run to confirm `platform-parent` now executes alongside the failing `orders-service`.
 - [ ] Choose Foundry CI authentication: GitHub OIDC federated credential to Entra (workload identity, no long-lived secret).
 
 ## Phase 3: Preserve the transformed output
