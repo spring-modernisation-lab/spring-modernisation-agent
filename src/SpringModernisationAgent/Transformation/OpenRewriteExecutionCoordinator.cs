@@ -3,7 +3,7 @@ using SpringModernisationAgent.Workspace;
 
 namespace SpringModernisationAgent.Transformation;
 
-public sealed class OpenRewriteExecutionCoordinator
+public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoordinator
 {
     private readonly IRepositoryWorkspaceProvider _workspaceProvider;
     private readonly IRepositoryWorkspaceCleaner _workspaceCleaner;

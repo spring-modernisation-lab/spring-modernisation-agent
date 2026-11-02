@@ -1,366 +1,127 @@
-﻿using SpringModernisationAgent.AI;
-using SpringModernisationAgent.Analysis;
-using SpringModernisationAgent.Config;
-using SpringModernisationAgent.GitHub;
-using SpringModernisationAgent.Maven;
-using SpringModernisationAgent.Models;
-using SpringModernisationAgent.Reporting;
-using SpringModernisationAgent.Transformation;
+﻿using SpringModernisationAgent.Commands;
 
-var token =
-    Environment.GetEnvironmentVariable("GITHUB_TOKEN")
-    ?? throw new InvalidOperationException(
-        "GITHUB_TOKEN environment variable isn't set.");
+using var cancellationTokenSource =
+    new CancellationTokenSource();
 
-var organisation =
-    Environment.GetEnvironmentVariable("GITHUB_ORGANISATION")
-    ?? throw new InvalidOperationException(
-        "GITHUB_ORGANISATION environment variable isn't set.");
-
-var provider =
-    new GitHubRepositoryProvider(token);
-
-var parser =
-    new MavenPomParser();
-
-var repositories =
-    await provider.GetRepositoriesAsync(organisation);
-
-var inventories =
-    new List<RepositoryInventory>();
-
-foreach (var repository in repositories.OrderBy(r => r.Name))
+Console.CancelKeyPress += (_, eventArgs) =>
 {
-    var commitSha = await provider.GetCommitShaAsync(
-        organisation,
-        repository.Name,
-        repository.DefaultBranch);
-
-    var pom = await provider.GetFileContentAsync(
-        organisation,
-        repository.Name,
-        "pom.xml",
-        commitSha);
-
-    if (pom is null)
-    {
-        Console.WriteLine(
-            $"{repository.Name}: not a Maven project");
-
-        continue;
-    }
-
-    try
-    {
-        var project = parser.Parse(pom);
-
-        inventories.Add(
-            new RepositoryInventory(
-                RepositoryName: repository.Name,
-                CommitSha: commitSha,
-                MavenProject: project));
-    }
-    catch (Exception exception)
-    {
-        Console.WriteLine(
-            $"Unable to analyse {repository.Name}: " +
-            exception.Message);
-    }
-}
-
-var graphBuilder =
-    new DependencyGraphBuilder();
-
-var graph =
-    graphBuilder.Build(inventories);
-
-Console.WriteLine();
-Console.WriteLine("Repository dependency graph");
-Console.WriteLine("===========================");
-
-foreach (var edge in graph.Edges)
-{
-    Console.WriteLine(
-        $"{edge.FromRepository} " +
-        $"--{edge.Type}--> " +
-        $"{edge.ToRepository} " +
-        $"[{edge.Version ?? "unknown"}]");
-}
-
-var repositoriesByArtifact =
-    inventories.ToDictionary(
-        inventory =>
-            inventory.MavenProject.Coordinate.Key,
-        inventory => inventory,
-        StringComparer.OrdinalIgnoreCase);
-
-var springAnalyzer =
-    new SpringPlatformAnalyzer();
-
-var assessments =
-    new List<RepositoryAssessment>();
-
-var repositoryClassifier = new RepositoryClassifier();
-
-foreach (var inventory in inventories)
-{
-    var kind = repositoryClassifier.Classify(inventory.MavenProject);
-
-    var spring =
-        springAnalyzer.Analyze(
-            inventory,
-            repositoriesByArtifact);
-
-    var internalEdges =
-        graph.Edges
-            .Where(edge =>
-                edge.FromRepository.Equals(
-                    inventory.RepositoryName,
-                    StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-    var internalArtifactKeys =
-        internalEdges
-            .Select(edge =>
-                inventories.Single(
-                    candidate =>
-                        candidate.RepositoryName.Equals(
-                            edge.ToRepository,
-                            StringComparison.OrdinalIgnoreCase)))
-            .Select(candidate =>
-                candidate.MavenProject.Coordinate.Key)
-            .ToHashSet(
-                StringComparer.OrdinalIgnoreCase);
-
-    var externalDependencies =
-        inventory.MavenProject.Dependencies
-            .Where(dependency =>
-                !internalArtifactKeys.Contains(
-                    dependency.Coordinate.Key))
-            .ToList();
-
-    assessments.Add(
-        new RepositoryAssessment(
-            RepositoryName: inventory.RepositoryName,
-            CommitSha: inventory.CommitSha,
-            Kind: kind,
-            MavenProject: inventory.MavenProject,
-            Spring: spring,
-            InternalDependencies: internalEdges,
-            ExternalDependencies: externalDependencies));
-}
-
-Console.WriteLine();
-Console.WriteLine("Technology inventory");
-Console.WriteLine("====================");
-
-foreach (var assessment in
-         assessments.OrderBy(a => a.RepositoryName))
-{
-    Console.WriteLine();
-    Console.WriteLine(assessment.RepositoryName);
-
-    Console.WriteLine(
-        $"  Spring Boot: " +
-        $"{assessment.Spring.SpringBootVersion ?? "unknown"}");
-
-    Console.WriteLine(
-        $"  Java: " +
-        $"{assessment.Spring.JavaVersion ?? "unknown"}");
-
-    Console.WriteLine("  Spring starters:");
-
-    foreach (var starter in assessment.Spring.Starters)
-    {
-        Console.WriteLine(
-            $"    - {starter}");
-    }
-
-    Console.WriteLine("  Internal dependencies:");
-
-    foreach (var dependency in
-             assessment.InternalDependencies)
-    {
-        Console.WriteLine(
-            $"    - {dependency.ToRepository} " +
-            $"[{dependency.Type}]");
-    }
-
-    Console.WriteLine("  External dependencies:");
-
-    foreach (var dependency in
-             assessment.ExternalDependencies)
-    {
-        Console.WriteLine(
-            $"    - {dependency.Coordinate} " +
-            $"[{dependency.Scope}]");
-    }
-}
-
-var migrationWaveBuilder = new MigrationWaveBuilder();
-
-var assessmentBuilder = new ProjectAssessmentBuilder(
-    migrationWaveBuilder);
-
-var projectAssessment = assessmentBuilder.Build(
-    organisation,
-    assessments,
-    graph);
-
-// Load the approved Spring migration policy.
-var policyPath = Path.Combine(
-    AppContext.BaseDirectory,
-    "Config",
-    "spring.yaml");
-
-var policyLoader = new SpringMigrationPolicyLoader();
-var policy = policyLoader.Load(policyPath);
-
-// Apply approved migration routes to each repository.
-var routeSelector = new MigrationRouteSelector();
-var policyAssessment = new MigrationPolicyAssessment(routeSelector);
-
-projectAssessment = policyAssessment.Apply(
-    projectAssessment,
-    policy);
-
-var baselineResultsPath = Path.Combine(
-    Directory.GetCurrentDirectory(),
-    "Artifacts",
-    "baseline-build-results.json");
-
-if (File.Exists(baselineResultsPath))
-{
-    var resultsReader = new PortfolioBaselineBuildResultsReader();
-
-    var baselineBuildResults = await resultsReader.ReadAsync(
-        baselineResultsPath);
-
-    var baselineBuildValidator = new BaselineBuildValidator();
-    var commitProvenanceValidator = new CommitProvenanceValidator();
-
-    var baselineBuildAssessment = new BaselineBuildAssessment(
-        baselineBuildValidator,
-        commitProvenanceValidator);
-
-    projectAssessment = baselineBuildAssessment.Apply(
-        projectAssessment,
-        baselineBuildResults);
-}
-
-var readinessEvaluator = new MigrationReadinessEvaluator();
-
-var repositoriesWithReadiness = projectAssessment.Repositories
-    .Select(repository => repository with
-    {
-        MigrationReadiness = readinessEvaluator.Evaluate(repository)
-    })
-    .ToList();
-
-projectAssessment = projectAssessment with
-{
-    Repositories = repositoriesWithReadiness
+    eventArgs.Cancel = true;
+    cancellationTokenSource.Cancel();
 };
 
-var openRewriteValidator =
-    new OpenRewriteConfigurationValidator();
+var cancellationToken =
+    cancellationTokenSource.Token;
 
-var transformationPlanBuilder = new TransformationPlanBuilder(
-    openRewriteValidator);
+var command = args
+    .FirstOrDefault()?
+    .Trim()
+    .ToLowerInvariant();
 
-var transformationPlans = projectAssessment.Repositories
-    .Where(repository =>
-        repository.MigrationReadiness?.CanProceed == true)
-    .Select(repository =>
-        transformationPlanBuilder.Build(
-            repository,
-            projectAssessment.MigrationWaves))
-    .OrderBy(plan => plan.MigrationWave)
-    .ThenBy(plan => plan.RepositoryName)
-    .ToList();
+try
+{
+    switch (command)
+    {
+        case null:
+        case "":
+        case "assess":
+            {
+                var assessCommand =
+                    new AssessCommand();
 
-var executionPlanBuilder = new OpenRewriteExecutionPlanBuilder();
+                await assessCommand.ExecuteAsync(
+                    cancellationToken);
 
-var transformationPlansWriter = new TransformationPlansWriter();
+                break;
+            }
 
-var transformationPlansPath = Path.Combine(
-    Directory.GetCurrentDirectory(),
-    "Artifacts",
-    "transformation-plans.json");
+        case "transform":
+            {
+                var transformCommand =
+                    new TransformCommand();
 
-await transformationPlansWriter.WriteAsync(
-    transformationPlans,
-    transformationPlansPath);
+                await transformCommand.ExecuteAsync(
+                    cancellationToken);
 
-Console.WriteLine(
-    $"Transformation plans written to: {transformationPlansPath}");
+                break;
+            }
 
-// Generate the read-only AI migration strategy.
+        case "help":
+        case "--help":
+        case "-h":
+            {
+                WriteUsage();
+                break;
+            }
 
-var migrationAnalysisInputBuilder =
-    new MigrationAnalysisInputBuilder();
+        default:
+            {
+                Console.Error.WriteLine(
+                    $"Unknown command '{command}'.");
 
-// No transformations have been executed yet.
-// This is the pre-migration strategy stage.
-IReadOnlyList<TransformationExecutionResult> transformationResults = [];
+                Console.Error.WriteLine();
 
-var migrationAnalysisInput =
-    migrationAnalysisInputBuilder.Build(
-        projectAssessment,
-        transformationResults);
+                WriteUsage();
 
-var migrationAnalysisAgent =
-    MigrationAnalysisAgentFactory.Create();
+                Environment.ExitCode = 1;
 
-var migrationAnalysis =
-    await migrationAnalysisAgent.AnalyzeAsync(
-        migrationAnalysisInput);
+                break;
+            }
+    }
+}
+catch (OperationCanceledException)
+{
+    Console.Error.WriteLine();
+    Console.Error.WriteLine(
+        "Operation cancelled.");
 
-var migrationAnalysisWriter =
-    new MigrationAnalysisResultWriter();
+    Environment.ExitCode = 2;
+}
+catch (Exception exception)
+{
+    Console.Error.WriteLine();
+    Console.Error.WriteLine(
+        "The command failed.");
 
-var migrationAnalysisPath = Path.Combine(
-    Directory.GetCurrentDirectory(),
-    "Artifacts",
-    "migration-analysis.json");
+    Console.Error.WriteLine(
+        exception.Message);
 
-await migrationAnalysisWriter.WriteAsync(
-    migrationAnalysis,
-    migrationAnalysisPath);
+    Environment.ExitCode = 1;
+}
 
-Console.WriteLine();
-Console.WriteLine(
-    $"Migration analysis written to: {migrationAnalysisPath}");
+static void WriteUsage()
+{
+    Console.WriteLine(
+        "Spring Modernisation Agent");
 
-var migrationStrategyDocumentWriter =
-    new MigrationStrategyDocumentWriter();
+    Console.WriteLine();
 
-var migrationStrategyDocumentPath = Path.Combine(
-    Directory.GetCurrentDirectory(),
-    "Artifacts",
-    "spring-modernisation-migration-strategy.docx");
+    Console.WriteLine(
+        "Usage:");
 
-await migrationStrategyDocumentWriter.WriteAsync(
-    projectAssessment,
-    migrationAnalysis,
-    transformationPlans,
-    migrationStrategyDocumentPath);
+    Console.WriteLine(
+        "  dotnet run --project " +
+        @".\src\SpringModernisationAgent -- assess");
 
-Console.WriteLine(
-    $"Migration strategy document written to: " +
-    $"{migrationStrategyDocumentPath}");
+    Console.WriteLine(
+        "      Analyse the repository estate, generate approved " +
+        "transformation plans, produce the AI migration strategy " +
+        "and generate the strategy document.");
 
-// Write the finished assessment.
-var assessmentWriter = new ProjectAssessmentWriter();
+    Console.WriteLine();
 
-var outputPath = Path.Combine(
-    Directory.GetCurrentDirectory(),
-    "Artifacts",
-    "project-assessment.json");
+    Console.WriteLine(
+        "  dotnet run --project " +
+        @".\src\SpringModernisationAgent -- transform");
 
-await assessmentWriter.WriteAsync(
-    projectAssessment,
-    outputPath);
+    Console.WriteLine(
+        "      Explicitly execute one eligible migration wave.");
 
-Console.WriteLine();
-Console.WriteLine($"Project assessment written to: {outputPath}");
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "  dotnet run --project " +
+        @".\src\SpringModernisationAgent -- help");
+
+    Console.WriteLine(
+        "      Display this help.");
+}
