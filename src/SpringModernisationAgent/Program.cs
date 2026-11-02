@@ -1,8 +1,10 @@
-﻿using SpringModernisationAgent.Analysis;
+﻿using SpringModernisationAgent.AI;
+using SpringModernisationAgent.Analysis;
 using SpringModernisationAgent.Config;
 using SpringModernisationAgent.GitHub;
 using SpringModernisationAgent.Maven;
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Reporting;
 using SpringModernisationAgent.Transformation;
 
 var token =
@@ -292,6 +294,61 @@ await transformationPlansWriter.WriteAsync(
 
 Console.WriteLine(
     $"Transformation plans written to: {transformationPlansPath}");
+
+// Generate the read-only AI migration strategy.
+
+var migrationAnalysisInputBuilder =
+    new MigrationAnalysisInputBuilder();
+
+// No transformations have been executed yet.
+// This is the pre-migration strategy stage.
+IReadOnlyList<TransformationExecutionResult> transformationResults = [];
+
+var migrationAnalysisInput =
+    migrationAnalysisInputBuilder.Build(
+        projectAssessment,
+        transformationResults);
+
+var migrationAnalysisAgent =
+    MigrationAnalysisAgentFactory.Create();
+
+var migrationAnalysis =
+    await migrationAnalysisAgent.AnalyzeAsync(
+        migrationAnalysisInput);
+
+var migrationAnalysisWriter =
+    new MigrationAnalysisResultWriter();
+
+var migrationAnalysisPath = Path.Combine(
+    Directory.GetCurrentDirectory(),
+    "Artifacts",
+    "migration-analysis.json");
+
+await migrationAnalysisWriter.WriteAsync(
+    migrationAnalysis,
+    migrationAnalysisPath);
+
+Console.WriteLine();
+Console.WriteLine(
+    $"Migration analysis written to: {migrationAnalysisPath}");
+
+var migrationStrategyDocumentWriter =
+    new MigrationStrategyDocumentWriter();
+
+var migrationStrategyDocumentPath = Path.Combine(
+    Directory.GetCurrentDirectory(),
+    "Artifacts",
+    "spring-modernisation-migration-strategy.docx");
+
+await migrationStrategyDocumentWriter.WriteAsync(
+    projectAssessment,
+    migrationAnalysis,
+    transformationPlans,
+    migrationStrategyDocumentPath);
+
+Console.WriteLine(
+    $"Migration strategy document written to: " +
+    $"{migrationStrategyDocumentPath}");
 
 // Write the finished assessment.
 var assessmentWriter = new ProjectAssessmentWriter();

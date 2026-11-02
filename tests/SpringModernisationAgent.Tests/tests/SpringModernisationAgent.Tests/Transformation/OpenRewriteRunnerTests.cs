@@ -1,6 +1,6 @@
+using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Transformation;
-using SpringModernisationAgent.Build;
 
 namespace SpringModernisationAgent.Tests.Transformation;
 
