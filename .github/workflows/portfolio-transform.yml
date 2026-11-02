@@ -109,9 +109,6 @@ jobs:
 
     timeout-minutes: 60
 
-    env:
-      MIGRATION_WORKSPACE_ROOT: ${{ runner.temp }}/spring-modernisation-workspaces
-
     steps:
       - name: Checkout migration application
         uses: actions/checkout@v6
@@ -165,6 +162,8 @@ jobs:
       - name: Execute next eligible migration wave
         env:
           GITHUB_TOKEN: ${{ secrets.MIGRATION_GITHUB_TOKEN }}
+          # The runner context is only available at step level.
+          MIGRATION_WORKSPACE_ROOT: ${{ runner.temp }}/spring-modernisation-workspaces
         run: >
           dotnet run
           --project ./src/SpringModernisationAgent
