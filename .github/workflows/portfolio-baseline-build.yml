@@ -2,6 +2,20 @@ name: Portfolio Baseline Build
 
 on:
   workflow_dispatch:
+    inputs:
+      fail-on-baseline-failure:
+        description: Fail the workflow if any baseline build fails
+        type: boolean
+        default: true
+
+  # Called by portfolio-transform.yml so that every migration run assesses
+  # readiness against baseline evidence for the exact commits it migrates.
+  workflow_call:
+    inputs:
+      fail-on-baseline-failure:
+        description: Fail the workflow if any baseline build fails
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -99,6 +113,27 @@ jobs:
         run: mvn --batch-mode clean verify
 
       # -------------------------
+      # Standalone applications
+      # -------------------------
+
+      - name: Checkout orders-service
+        uses: actions/checkout@v6
+        with:
+          repository: spring-modernisation-lab/orders-service
+          path: repositories/orders-service
+
+      - name: Capture orders-service commit
+        id: orders_service_commit
+        working-directory: repositories/orders-service
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build orders-service
+        id: orders_service
+        continue-on-error: true
+        working-directory: repositories/orders-service
+        run: mvn --batch-mode clean verify
+
+      # -------------------------
       # Structured results
       # -------------------------
 
@@ -116,6 +151,9 @@ jobs:
         
           CUSTOMER_SERVICE: ${{ steps.customer_service.outcome }}
           CUSTOMER_SERVICE_SHA: ${{ steps.customer_service_commit.outputs.sha }}
+
+          ORDERS_SERVICE: ${{ steps.orders_service.outcome }}
+          ORDERS_SERVICE_SHA: ${{ steps.orders_service_commit.outputs.sha }}
         run: |
           mkdir -p artifacts
 
@@ -155,6 +193,13 @@ jobs:
                       "Wave": 3,
                       "Operation": "Verify",
                       "Status": status(os.environ["CUSTOMER_SERVICE"])
+                  },
+                  {
+                      "RepositoryName": "orders-service",
+                      "CommitSha": os.environ["ORDERS_SERVICE_SHA"],
+                      "Wave": 1,
+                      "Operation": "Verify",
+                      "Status": status(os.environ["ORDERS_SERVICE"])
                   }
               ]
           }
@@ -183,17 +228,19 @@ jobs:
       # -------------------------
 
       - name: Fail workflow if a baseline build failed
-        if: always()
+        if: always() && inputs.fail-on-baseline-failure
         env:
           PLATFORM_PARENT: ${{ steps.platform_parent.outcome }}
           SHARED_SECURITY: ${{ steps.shared_security.outcome }}
           ACCOUNT_SERVICE: ${{ steps.account_service.outcome }}
           CUSTOMER_SERVICE: ${{ steps.customer_service.outcome }}
+          ORDERS_SERVICE: ${{ steps.orders_service.outcome }}
         run: |
           if [ "$PLATFORM_PARENT" != "success" ] ||
              [ "$SHARED_SECURITY" != "success" ] ||
              [ "$ACCOUNT_SERVICE" != "success" ] ||
-             [ "$CUSTOMER_SERVICE" != "success" ]; then
+             [ "$CUSTOMER_SERVICE" != "success" ] ||
+             [ "$ORDERS_SERVICE" != "success" ]; then
             echo "One or more baseline builds failed."
             exit 1
           fi

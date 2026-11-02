@@ -81,9 +81,14 @@ public sealed class AssessCommand
             }
             catch (Exception exception)
             {
-                Console.WriteLine(
-                    $"Unable to analyse {repository.Name}: " +
-                    exception.Message);
+                // Fail closed: a repository missing from the inventory would
+                // silently disappear from the dependency graph, and its
+                // dependants could be scheduled in too early a wave.
+                throw new InvalidOperationException(
+                    $"Unable to analyse {repository.Name} at {commitSha}: " +
+                    $"{exception.Message} Assessment stopped because the " +
+                    "dependency graph would be incomplete.",
+                    exception);
             }
         }
 
@@ -205,18 +210,82 @@ public sealed class AssessCommand
             BuildTransformationPlans(
                 projectAssessment);
 
+        var waveGateResult =
+            new MigrationWaveGate().Apply(
+                projectAssessment.MigrationWaves,
+                transformationPlans);
+
+        WriteWaveGateSummary(waveGateResult);
+
         var artifactsDirectory =
             GetArtifactsDirectory();
 
+        // Deterministic artifacts are written before the optional AI stage,
+        // so an AI or authentication failure can never prevent migration.
+        // Only plans released by the wave gate become executable contracts.
         await WriteTransformationPlansAsync(
+            waveGateResult.ExecutablePlans,
+            artifactsDirectory,
+            cancellationToken);
+
+        await WriteProjectAssessmentAsync(
+            projectAssessment,
+            artifactsDirectory,
+            cancellationToken);
+
+        // The strategy explains the whole estate, including withheld plans.
+        await WriteStrategyArtifactsAsync(
+            projectAssessment,
             transformationPlans,
             artifactsDirectory,
             cancellationToken);
 
-        var migrationAnalysis =
-            await GenerateMigrationAnalysisAsync(
-                projectAssessment,
-                cancellationToken);
+        WriteCompletionSummary(
+            projectAssessment,
+            waveGateResult.ExecutablePlans);
+    }
+
+    private static async Task WriteStrategyArtifactsAsync(
+        ProjectAssessment projectAssessment,
+        IReadOnlyList<TransformationPlan> transformationPlans,
+        string artifactsDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(
+                Environment.GetEnvironmentVariable(
+                    "FOUNDRY_PROJECT_ENDPOINT")))
+        {
+            Console.WriteLine();
+            Console.WriteLine(
+                "Strategy Agent skipped: FOUNDRY_PROJECT_ENDPOINT is not " +
+                "configured. Deterministic assessment artifacts are complete.");
+
+            return;
+        }
+
+        MigrationAnalysisResult migrationAnalysis;
+
+        try
+        {
+            migrationAnalysis =
+                await GenerateMigrationAnalysisAsync(
+                    projectAssessment,
+                    cancellationToken);
+        }
+        catch (Exception exception)
+            when (exception is not OperationCanceledException)
+        {
+            Console.WriteLine();
+            Console.WriteLine(
+                "WARNING: Strategy Agent failed; the AI strategy and Word " +
+                "document were not produced. Deterministic assessment " +
+                "artifacts are complete and migration is not affected.");
+
+            Console.WriteLine(
+                $"  {exception.GetType().Name}: {exception.Message}");
+
+            return;
+        }
 
         await WriteMigrationAnalysisAsync(
             migrationAnalysis,
@@ -229,15 +298,32 @@ public sealed class AssessCommand
             transformationPlans,
             artifactsDirectory,
             cancellationToken);
+    }
 
-        await WriteProjectAssessmentAsync(
-            projectAssessment,
-            artifactsDirectory,
-            cancellationToken);
+    private static void WriteWaveGateSummary(
+        MigrationWaveGateResult waveGateResult)
+    {
+        if (waveGateResult.EarliestBlockedWave is null)
+        {
+            return;
+        }
 
-        WriteCompletionSummary(
-            projectAssessment,
-            transformationPlans);
+        Console.WriteLine();
+        Console.WriteLine(
+            $"Migration wave {waveGateResult.EarliestBlockedWave} contains " +
+            "repositories that are not ready: " +
+            string.Join(", ", waveGateResult.BlockedRepositories));
+
+        if (waveGateResult.WithheldPlans.Count > 0)
+        {
+            Console.WriteLine(
+                "Plans withheld from execution until they are resolved: " +
+                string.Join(
+                    ", ",
+                    waveGateResult.WithheldPlans.Select(
+                        plan => $"{plan.RepositoryName} " +
+                                $"(wave {plan.MigrationWave})")));
+        }
     }
 
     private static ProjectAssessment ApplyMigrationPolicy(

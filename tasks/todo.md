@@ -42,7 +42,7 @@ Put realistic upgrade traps into the demo app or apps, then **prove empirically*
 - [x] Five traps seeded; catalogue and hypotheses in `tasks/demo-traps.md` (kept out of the target repo on purpose).
 - [x] Probe workflow added: `.github/workflows/openrewrite-probe.yml`. It reads the recipes from `spring.yaml` and uploads the patch, logs and surefire reports.
 - [ ] Run the probe and record the results in `tasks/demo-traps.md`.
-- [ ] Add `orders-service` to `portfolio-baseline-build.yml`, which currently hardcodes the four repos.
+- [x] Add `orders-service` to `portfolio-baseline-build.yml` (still a hardcoded list; making it discovery-driven is backlog).
 - Original candidate list (superseded by `demo-traps.md`):
   - [ ] Custom Spring Security config with unusual `WebSecurityConfigurerAdapter` overrides.
   - [ ] A `javax.*` reference by reflection or string literal (e.g. `Class.forName("javax.servlet...")`).
@@ -55,12 +55,13 @@ Put realistic upgrade traps into the demo app or apps, then **prove empirically*
 
 ## Phase 2: Unblock CI execution (prerequisites)
 
-- [ ] **Fix wave gating to fail closed.** Today, blocked repos are filtered out of `transformation-plans.json` (`AssessCommand.cs:351`), so a blocked wave disappears and later waves become eligible. Make a non-Ready repo in a wave block every later wave (planner-level test first).
-- [ ] **Fail closed on POM parse errors** (`AssessCommand.cs:82`): an unparseable repo must block, not vanish from the graph.
-- [ ] **Feed baseline evidence into `portfolio-transform.yml`.** Download or produce `baseline-build-results.json` before assess. Fix the `artifacts/` vs `Artifacts/` case mismatch (Linux paths are case-sensitive).
-- [ ] **Make the Strategy Agent non-blocking for transform.** An AI or auth failure must not stop deterministic migration. Assess still writes the deterministic artifacts, and the strategy outputs become optional in the workflow.
+- [x] **Fix wave gating to fail closed.** Done with `MigrationWaveGate` (10 tests): `transformation-plans.json` only contains plans up to and including the earliest wave that has a non-Ready repo. The strategy document still shows every plan. Today, blocked repos are filtered out of `transformation-plans.json` (`AssessCommand.cs:351`), so a blocked wave disappears and later waves become eligible. Make a non-Ready repo in a wave block every later wave (planner-level test first).
+- [x] **Fail closed on POM parse errors** (`AssessCommand.cs:82`): an unparseable repo must block, not vanish from the graph.
+- [x] **Feed baseline evidence into `portfolio-transform.yml`.** The baseline workflow is now reusable (`workflow_call`), and the transform runs it first with `fail-on-baseline-failure: false`. Evidence comes from the same run as the migrated SHAs, and the case mismatch is fixed by downloading straight into `Artifacts/`. Download or produce `baseline-build-results.json` before assess. Fix the `artifacts/` vs `Artifacts/` case mismatch (Linux paths are case-sensitive).
+- [x] **Make the Strategy Agent non-blocking for transform.** Deterministic artifacts are written first. The AI stage is skipped when `FOUNDRY_PROJECT_ENDPOINT` is unset; if it fails, a warning is logged and assess continues. An AI or auth failure must not stop deterministic migration. Assess still writes the deterministic artifacts, and the strategy outputs become optional in the workflow.
 - [x] Fix the pinned OpenRewrite versions; the probe showed `rewrite-spring:6.43.0` and `rewrite-migrate-java:3.47.0` don't exist on Maven Central. Now 6.37.1 / 3.42.1, with plugin 6.46.1.
 - [ ] Make the policy check fail when a pinned artifact doesn't exist (add a CI step that resolves each pinned recipe artifact). `OpenRewriteConfigurationValidator` currently only checks that a version is present.
+- [ ] **Verify end to end:** run the `Spring modernisation` workflow. Expected: wave 1 = `orders-service` + `platform-parent`; `orders-service` fails `compile` with the same 12 errors as probe run 4, and the wave stops.
 - [ ] Choose Foundry CI authentication: GitHub OIDC federated credential to Entra (workload identity, no long-lived secret).
 
 ## Phase 3: Preserve the transformed output

@@ -18,7 +18,17 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
 
 - **Run 1:** failed before any recipe ran. The pinned `rewrite-spring:6.43.0` / `rewrite-migrate-java:3.47.0` don't exist on Maven Central; fixed to 6.37.1 / 3.42.1, with plugin 6.46.1. The baseline build passed (Boot 2.7 / Java 11).
 - **Run 2:** `UpgradeSpringBoot_3_5` applied. The `UpgradeToJava21` run then failed because the plugin's `run` goal compiles the project first, and the half-migrated code doesn't compile (12 errors; findings in the table above). Fixed by switching to `runNoFork` in both the probe and `OpenRewriteRunner` (the real engine had the same bug). The post-migration build did not run.
-- **Run 3:** _pending_.
+- **Run 3:** superseded (not reviewed).
+- **Run 4 (first complete run):** both recipes applied: Boot 2.7.18 → **3.5.16**, Java 11 → **21**, `httpclient` → `httpclient5`. OpenRewrite changed **7 files (+40/−37)** and reported *"Estimate time saved: 2h 57m"*. The post-migration build fails at **compile** with **12 errors in 3 files**:
+  - `SecurityConfiguration.java`: the DSL was modernised (lambda style, `requestMatchers`, `@EnableMethodSecurity`), but the class still extends the removed adapter. OpenRewrite **inserted its own hand-off marker** above `authenticationManagerBean()`: `/*~~(Migrate manually based on https://spring.io/blog/2022/02/21/spring-security-without-the-websecurityconfigureradapter)~~>*/`
+  - `MoneyUserType.java` / `CustomerOrder.java`: `@Type(MoneyUserType.class)` was rewritten, but the implementation still uses the Hibernate 5 API.
+  - `InventoryClientConfiguration.java`: `RequestConfig` timeouts were migrated, but the pool and TTL builder methods (`setMaxConnTotal`, `setMaxConnPerRoute`, `setConnectionTimeToLive`) weren't.
+  - Traps 3 and 5 are still latent; they'll only surface once the code compiles.
+  - Artifact: `openrewrite-probe-orders-service-4`.
+
+## Demo talking point (from run 4)
+
+> OpenRewrite did roughly 3 hours of mechanical work across 7 files in seconds, including the platform, Java version, `jakarta` namespace and security DSL. It then **explicitly flagged** what it couldn't do (*"Migrate manually"*), and left 12 compile errors in 3 files. That remainder is where the AI comes in.
 
 ## Expected demo progression (if the hypotheses hold)
 

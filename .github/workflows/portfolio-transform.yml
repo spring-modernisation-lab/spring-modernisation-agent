@@ -15,8 +15,18 @@ env:
   OPENREWRITE_MAVEN_PLUGIN_VERSION: "6.46.1"
 
 jobs:
+  baseline:
+    name: Baseline build evidence
+    uses: ./.github/workflows/portfolio-baseline-build.yml
+    with:
+      # A failed baseline is evidence for readiness (the repository becomes
+      # Blocked), not a reason to stop assessing the rest of the estate.
+      fail-on-baseline-failure: false
+
   assess:
     name: Assess estate and generate strategy
+    needs:
+      - baseline
     runs-on: ubuntu-latest
 
     timeout-minutes: 30
@@ -45,6 +55,12 @@ jobs:
           --no-build
           --configuration Release
 
+      - name: Download baseline build evidence
+        uses: actions/download-artifact@v6
+        with:
+          name: baseline-build-results
+          path: Artifacts
+
       - name: Run portfolio assessment
         env:
           GITHUB_TOKEN: ${{ secrets.MIGRATION_GITHUB_TOKEN }}
@@ -52,10 +68,9 @@ jobs:
           FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
           FOUNDRY_MODEL: ${{ vars.FOUNDRY_MODEL }}
 
-          # This is CI, so don't use the local Development identity mode.
-          #
-          # For the prototype we need to choose the CI authentication
-          # mechanism separately before enabling the real Foundry call.
+          # Optional: when FOUNDRY_PROJECT_ENDPOINT is not configured the
+          # Strategy Agent is skipped, and if it fails assess still succeeds.
+          # Deterministic migration never depends on the AI stage.
           FOUNDRY_AUTH_MODE: ${{ vars.FOUNDRY_AUTH_MODE }}
         run: >
           dotnet run
@@ -65,19 +80,20 @@ jobs:
           --
           assess
 
-      - name: Verify assessment outputs
+      - name: Verify deterministic assessment outputs
         shell: bash
         run: |
+          test -f Artifacts/baseline-build-results.json
           test -f Artifacts/project-assessment.json
           test -f Artifacts/transformation-plans.json
-          test -f Artifacts/migration-analysis.json
-          test -f Artifacts/spring-modernisation-migration-strategy.docx
 
       - name: Upload assessment outputs
         uses: actions/upload-artifact@v5
         with:
           name: spring-modernisation-assessment
+          # The AI strategy files are optional; missing ones are skipped.
           path: |
+            Artifacts/baseline-build-results.json
             Artifacts/project-assessment.json
             Artifacts/transformation-plans.json
             Artifacts/migration-analysis.json
