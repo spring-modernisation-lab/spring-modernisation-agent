@@ -66,8 +66,8 @@ Put realistic upgrade traps into the demo app or apps, then **prove empirically*
 - [x] Re-run to confirm `platform-parent` now executes alongside the failing `orders-service` (run 8). `orders-service` failed `compile` (same errors). **`platform-parent` passed:** OpenRewrite changed `pom.xml` **and `.github/workflows/baseline-build.yml`** (the Java 21 recipe also upgrades `setup-java` in CI), and `effective-pom` and `dependency-resolution` passed.
 - [ ] **Draft PR implication:** migrations can modify `.github/workflows/*`, so pushing the branch needs the token to also have **Workflows: Read and write**; otherwise GitHub rejects the push. The reviewer summary should call out CI-file changes explicitly.
 - [x] Choose Foundry CI authentication: GitHub OIDC federated credential to Entra. New `FoundryAuthenticationMode.AzureCli`; the assess job uses `azure/login@v2` with `id-token: write`. App `spring-modernisation-agent-ci` (appId `945c44c2-9524-4a6e-978e-1700c98dfa55`); federated subject `repo:spring-modernisation-lab/spring-modernisation-agent:ref:refs/heads/main`.
-- [ ] Grant **Azure AI User** on `spring-modernisation-pr-resource` to the CI service principal (user runs this).
-- [ ] Set repo variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_MODEL` (user).
+- [x] Grant **Foundry User** (the role formerly called "Azure AI User") on `spring-modernisation-pr-resource` to the CI service principal.
+- [x] Set repo variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_MODEL`.
 - [ ] Confirm the run produces `spring-modernisation-migration-strategy.docx` in the assessment artifact.
 
 ## Phase 3: Preserve the transformed output

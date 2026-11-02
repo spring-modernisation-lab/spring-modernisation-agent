@@ -67,12 +67,14 @@ jobs:
           name: baseline-build-results
           path: Artifacts
 
-      # The Strategy Agent is optional. Without AZURE_CLIENT_ID the login is
-      # skipped, FOUNDRY_PROJECT_ENDPOINT is left empty, and assess skips the
-      # AI stage. If the agent fails, assess still succeeds. Deterministic
-      # migration never depends on the AI stage.
+      # The Strategy Agent is optional. If AZURE_CLIENT_ID is not set, or the
+      # Azure login fails, FOUNDRY_PROJECT_ENDPOINT is left empty and assess
+      # skips the AI stage. If the agent itself fails, assess still succeeds.
+      # Deterministic migration never depends on the AI stage.
       - name: Sign in to Azure (GitHub OIDC)
+        id: azure_login
         if: vars.AZURE_CLIENT_ID != ''
+        continue-on-error: true
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -83,7 +85,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MIGRATION_GITHUB_TOKEN }}
 
-          FOUNDRY_PROJECT_ENDPOINT: ${{ vars.AZURE_CLIENT_ID != '' && vars.FOUNDRY_PROJECT_ENDPOINT || '' }}
+          FOUNDRY_PROJECT_ENDPOINT: ${{ steps.azure_login.outcome == 'success' && vars.FOUNDRY_PROJECT_ENDPOINT || '' }}
           FOUNDRY_MODEL: ${{ vars.FOUNDRY_MODEL }}
           FOUNDRY_AUTH_MODE: AzureCli
         run: >
