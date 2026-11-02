@@ -281,7 +281,7 @@ public class OpenRewriteRunnerTests
                     Assert.Equal(
                         [
                             "--batch-mode",
-                            "org.openrewrite.maven:rewrite-maven-plugin:6.25.0:run",
+                            "org.openrewrite.maven:rewrite-maven-plugin:6.25.0:runNoFork",
                             "-Drewrite.activeRecipes=org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5",
                             "-Drewrite.recipeArtifactCoordinates=org.openrewrite.recipe:rewrite-spring:6.43.0"
                         ],
@@ -293,7 +293,7 @@ public class OpenRewriteRunnerTests
                     Assert.Equal(
                         [
                             "--batch-mode",
-                            "org.openrewrite.maven:rewrite-maven-plugin:6.25.0:run",
+                            "org.openrewrite.maven:rewrite-maven-plugin:6.25.0:runNoFork",
                             "-Drewrite.activeRecipes=org.openrewrite.java.migrate.UpgradeToJava21",
                             "-Drewrite.recipeArtifactCoordinates=org.openrewrite.recipe:rewrite-migrate-java:3.47.0"
                         ],

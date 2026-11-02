@@ -99,7 +99,7 @@ jobs:
 
             echo "::group::$recipe ($artifact:$version)"
             mvn --batch-mode \
-              "org.openrewrite.maven:rewrite-maven-plugin:${OPENREWRITE_MAVEN_PLUGIN_VERSION}:run" \
+              "org.openrewrite.maven:rewrite-maven-plugin:${OPENREWRITE_MAVEN_PLUGIN_VERSION}:runNoFork" \
               "-Drewrite.activeRecipes=${recipe}" \
               "-Drewrite.recipeArtifactCoordinates=${artifact}:${version}" \
               2>&1 | tee -a "$OUTPUT_DIR/openrewrite.log"

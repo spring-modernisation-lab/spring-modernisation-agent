@@ -98,12 +98,17 @@ public sealed class OpenRewriteRunner : IOpenRewriteRunner
     {
         ValidateRecipe(recipe);
 
+        // runNoFork, not run: the run goal forks the lifecycle to
+        // process-test-classes, i.e. compiles the project first. Recipes
+        // execute one at a time, so after the first recipe the code is
+        // intentionally mid-migration and will not compile; compilation
+        // belongs to post-transformation validation, not recipe execution.
         var arguments = new[]
         {
                 "--batch-mode",
 
                 $"org.openrewrite.maven:rewrite-maven-plugin:" +
-                $"{_mavenPluginVersion}:run",
+                $"{_mavenPluginVersion}:runNoFork",
 
                 $"-Drewrite.activeRecipes={recipe.Recipe}",
 
