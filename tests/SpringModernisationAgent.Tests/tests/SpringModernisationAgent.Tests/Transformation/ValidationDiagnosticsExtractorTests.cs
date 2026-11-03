@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Transformation;
 
 namespace SpringModernisationAgent.Tests.Transformation;
@@ -202,5 +203,62 @@ public class ValidationDiagnosticsExtractorTests
             line.Length);
 
         Assert.EndsWith("...", line);
+    }
+
+    [Fact]
+    public void Extract_CheckWithFailingTests_ListsTestsBeforeBuildOutput()
+    {
+        var check = new TransformationValidationCheckResult(
+            Check: "unit-tests",
+            Passed: false,
+            StandardOutput: "[ERROR] Tests run: 2, Failures: 1, Errors: 1",
+            StandardError: null)
+        {
+            FailingTests =
+            [
+                new FailingTest(
+                    TestClass: "com.example.OrdersApplicationTests",
+                    TestName: "contextLoads",
+                    Kind: "error",
+                    Type: "java.lang.IllegalStateException",
+                    Message: "Failed to load ApplicationContext",
+                    RootCause: "java.lang.ClassNotFoundException: javax.servlet.http.HttpServletRequest",
+                    Frames: ["com.example.platform.Check.verify(Check.java:31)"]),
+                new FailingTest(
+                    TestClass: "com.example.web.OrderControllerTests",
+                    TestName: "trailingSlash",
+                    Kind: "failure",
+                    Type: "java.lang.AssertionError",
+                    Message: "Status expected:<200> but was:<404>",
+                    RootCause: null,
+                    Frames: [])
+            ]
+        };
+
+        Assert.Equal(
+            [
+                "FAILED TEST com.example.OrdersApplicationTests.contextLoads " +
+                "(error): java.lang.IllegalStateException: Failed to load ApplicationContext",
+                "  root cause: java.lang.ClassNotFoundException: javax.servlet.http.HttpServletRequest",
+                "  at com.example.platform.Check.verify(Check.java:31)",
+                "FAILED TEST com.example.web.OrderControllerTests.trailingSlash " +
+                "(failure): java.lang.AssertionError: Status expected:<200> but was:<404>",
+                "[ERROR] Tests run: 2, Failures: 1, Errors: 1"
+            ],
+            ValidationDiagnosticsExtractor.Extract(check));
+    }
+
+    [Fact]
+    public void Extract_CheckWithoutFailingTests_MatchesOutputExtraction()
+    {
+        var check = new TransformationValidationCheckResult(
+            Check: "compile",
+            Passed: false,
+            StandardOutput: "[ERROR] /src/A.java:[1,1] cannot find symbol",
+            StandardError: "stderr line");
+
+        Assert.Equal(
+            ValidationDiagnosticsExtractor.Extract(check.StandardOutput, check.StandardError),
+            ValidationDiagnosticsExtractor.Extract(check));
     }
 }

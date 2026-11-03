@@ -339,9 +339,7 @@ public sealed class MigrationResultsDocumentWriter
         {
             AddHeading(body, $"Build diagnostics ({check.Check})", 3);
 
-            var diagnostics = ValidationDiagnosticsExtractor.Extract(
-                check.StandardOutput,
-                check.StandardError);
+            var diagnostics = ValidationDiagnosticsExtractor.Extract(check);
 
             if (diagnostics.Count == 0)
             {

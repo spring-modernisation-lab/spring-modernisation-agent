@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using SpringModernisationAgent.Models;
 
 namespace SpringModernisationAgent.Transformation;
 
@@ -27,11 +28,36 @@ public static partial class ValidationDiagnosticsExtractor
         "BUILD FAILURE"
     ];
 
+    /// <summary>
+    /// Diagnostics for a failed check: failing tests from the Surefire
+    /// reports first (they carry the root cause), then the build output.
+    /// </summary>
+    public static IReadOnlyList<string> Extract(
+        TransformationValidationCheckResult check)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+
+        return Extract(
+            check.StandardOutput,
+            check.StandardError,
+            check.FailingTests);
+    }
+
     public static IReadOnlyList<string> Extract(
         string? standardOutput,
         string? standardError)
     {
-        var lines = new List<string>();
+        return Extract(standardOutput, standardError, []);
+    }
+
+    private static IReadOnlyList<string> Extract(
+        string? standardOutput,
+        string? standardError,
+        IReadOnlyList<FailingTest> failingTests)
+    {
+        var lines = failingTests
+            .SelectMany(DescribeFailingTest)
+            .ToList();
 
         lines.AddRange(ExtractMavenErrors(standardOutput));
 
@@ -113,7 +139,30 @@ public static partial class ValidationDiagnosticsExtractor
                    content.StartsWith(prefix, StringComparison.Ordinal));
     }
 
-    private static string RemoveWorkspacePaths(
+    private static IEnumerable<string> DescribeFailingTest(
+        FailingTest test)
+    {
+        var cause = string.Join(
+            ": ",
+            new[] { test.Type, test.Message }
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
+
+        yield return
+            $"FAILED TEST {test.TestClass}.{test.TestName} ({test.Kind})" +
+            (cause.Length > 0 ? $": {cause}" : string.Empty);
+
+        if (test.RootCause is not null)
+        {
+            yield return $"  root cause: {test.RootCause}";
+        }
+
+        foreach (var frame in test.Frames)
+        {
+            yield return $"  at {frame}";
+        }
+    }
+
+    internal static string RemoveWorkspacePaths(
         string line)
     {
         // Workspaces are "<root>/<repository>-<32 hex>/"; keep only the

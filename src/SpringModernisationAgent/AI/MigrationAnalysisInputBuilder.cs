@@ -115,9 +115,7 @@ public sealed class MigrationAnalysisInputBuilder
                             Passed: check.Passed,
                             Diagnostics: check.Passed
                                 ? []
-                                : ValidationDiagnosticsExtractor.Extract(
-                                    check.StandardOutput,
-                                    check.StandardError)))
+                                : ValidationDiagnosticsExtractor.Extract(check)))
                     .ToList());
     }
 }

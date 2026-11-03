@@ -381,6 +381,66 @@ public class TransformationValidatorTests
             () => new TransformationValidator(null!));
     }
 
+    [Fact]
+    public async Task ValidateAsync_FailedTestCheck_AttachesFailingTestsWrittenDuringTheCheck()
+    {
+        var repositoryPath = CreateTemporaryDirectory();
+
+        try
+        {
+            var reports = Path.Combine(repositoryPath, "target", "surefire-reports");
+            Directory.CreateDirectory(reports);
+
+            // Left over from an earlier run: must not be reported.
+            var stale = Path.Combine(reports, "TEST-Stale.xml");
+            File.WriteAllText(stale, FailingReport("Stale"));
+            File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddHours(-1));
+
+            var mavenRunner = new FakeMavenProcessRunner(
+                [
+                    SuccessfulResult(),
+                    new MavenProcessResult(1, "[ERROR] Tests run: 1, Failures: 1", string.Empty)
+                ])
+            {
+                // Maven writes the report while the failing check runs.
+                OnRun = call =>
+                {
+                    if (call == 2)
+                    {
+                        File.WriteAllText(
+                            Path.Combine(reports, "TEST-Current.xml"),
+                            FailingReport("Current"));
+                    }
+                }
+            };
+
+            var result = await new TransformationValidator(mavenRunner).ValidateAsync(
+                CreateTransformationPlan(),
+                repositoryPath);
+
+            Assert.Empty(result.Checks[0].FailingTests);
+
+            var failingTest = Assert.Single(result.Checks[1].FailingTests);
+            Assert.Equal("Current", failingTest.TestClass);
+        }
+        finally
+        {
+            DeleteDirectory(repositoryPath);
+        }
+    }
+
+    private static string FailingReport(
+        string testClass)
+    {
+        return $"""
+            <testsuite name="{testClass}">
+              <testcase name="fails" classname="{testClass}">
+                <failure message="boom" type="java.lang.AssertionError"/>
+              </testcase>
+            </testsuite>
+            """;
+    }
+
     private static TransformationPlan CreateTransformationPlan()
     {
         return new TransformationPlan(
@@ -457,6 +517,8 @@ public class TransformationValidatorTests
 
         public List<MavenProcessCall> Calls { get; } = [];
 
+        public Action<int>? OnRun { get; init; }
+
         public Task<MavenProcessResult> RunAsync(
             string workingDirectory,
             IReadOnlyList<string> arguments,
@@ -467,6 +529,8 @@ public class TransformationValidatorTests
                     workingDirectory,
                     arguments.ToList(),
                     cancellationToken));
+
+            OnRun?.Invoke(Calls.Count);
 
             if (!_results.TryDequeue(out var result))
             {

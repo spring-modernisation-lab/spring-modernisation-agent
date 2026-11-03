@@ -80,7 +80,7 @@ Tasks:
   - Cleanup still runs when snapshotting throws.
   - Stage patches chain (attempt 1 diffs against the OpenRewrite tree, not the source).
   - Old results JSON without `Patches` still deserialises.
-- [ ] Verify: CI run. Download the artifact, then locally `git apply --check cumulative.patch` on a clean `orders-service` checkout at `b398665`, and confirm it matches the probe run 4 diff (7 files).
+- [x] Verified in CI run 11 (`71b36c2`): `orders-service` 7 files and `platform-parent` 2 files (including `.github/workflows/baseline-build.yml`, Java 11 → 21); recorded hashes match the files; `cumulative.patch` applies cleanly to `b398665` and produces a tree **identical** to probe run 4 (`7fdf1c1`). Original plan: download the artifact, then locally `git apply --check cumulative.patch` on a clean `orders-service` checkout at `b398665`, and confirm it matches the probe run 4 diff (7 files).
 
 ## Phase 4: Remediation Agent (the headline)
 
@@ -89,19 +89,19 @@ A separate agent from the Strategy Agent. It **reads and proposes**; C# **decide
 ### 4.1 Evidence (deterministic)
 
 - [x] `ValidationDiagnosticsExtractor` for Maven / javac output (compile errors with `symbol` and `location`, workspace paths removed, capped).
-- [ ] `SurefireReportReader`: failing tests from `target/surefire-reports/TEST-*.xml` (class, method, failure type and message, first stack frames inside the repo). Traps 3 and 5 only appear here. It must read the reports **before** cleanup.
-- [ ] Diagnostics for an attempt = extracted lines + failing tests + the failed check's name.
+- [x] `SurefireReportReader`: failing tests from `target/surefire-reports/TEST-*.xml` (class, method, failure type and message, first stack frames inside the repo). Traps 3 and 5 only appear here. It must read the reports **before** cleanup. Done: read by `TransformationValidator` after a failed check, only reports written during that check; DTDs rejected; the deepest `Caused by:` and the repo's own frames kept.
+- [x] Diagnostics for an attempt = extracted lines + failing tests + the failed check's name.
 
 ### 4.2 Read-only tools (scoped to the workspace)
 
 Exposed to the model as Agent Framework function tools. All paths are relative, and results never reveal the absolute workspace path.
 
-- [ ] `read_file(path, startLine?, endLine?)`: the path must resolve inside the workspace root. Reject `..`, absolute paths, symlinks leading out of the workspace, `.git/`, and files over a size cap.
-- [ ] `search_source(pattern, glob?)`: literal or regex search, bounded result count and line length.
-- [ ] `list_files(directory?)`: bounded.
-- [ ] `get_openrewrite_patch()` and `get_diagnostics()`: the stage patch and current diagnostics, capped.
-- [ ] No shell, Maven, git, network or write tool.
-- [ ] Tests: traversal, similar-prefix directories, symlinks, `.git/`, size and count limits, no absolute paths in output.
+- [x] `read_file(path, startLine?, endLine?)`: the path must resolve inside the workspace root. Reject `..`, absolute paths, symlinks leading out of the workspace, `.git/`, and files over a size cap.
+- [x] `search_source(pattern, glob?)`: literal or regex search, bounded result count and line length.
+- [x] `list_files(directory?)`: bounded.
+- [x] `get_openrewrite_patch()` and `get_diagnostics()`: the stage patch and current diagnostics, capped.
+- [x] No shell, Maven, git, network or write tool. Every call is recorded (`RemediationToolCall`) and capped by a per-attempt budget (default 40).
+- [x] Tests: traversal, similar-prefix directories, symlinks, `.git/`, size and count limits, no absolute paths in output.
 
 ### 4.3 Structured proposal (the AI never writes files)
 

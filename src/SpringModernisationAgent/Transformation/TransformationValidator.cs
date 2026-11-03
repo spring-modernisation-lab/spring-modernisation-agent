@@ -50,6 +50,9 @@ public sealed class TransformationValidator
                 TransformationValidationMapping.GetMavenArguments(
                     check);
 
+            // Allow for coarse file timestamp resolution.
+            var checkStartedUtc = DateTime.UtcNow.AddSeconds(-2);
+
             var processResult =
                 await _mavenProcessRunner.RunAsync(
                     repositoryPath,
@@ -65,7 +68,14 @@ public sealed class TransformationValidator
                     StandardOutput:
                         NullIfEmpty(processResult.StandardOutput),
                     StandardError:
-                        NullIfEmpty(processResult.StandardError)));
+                        NullIfEmpty(processResult.StandardError))
+                {
+                    FailingTests = passed
+                        ? []
+                        : SurefireReportReader.Read(
+                            repositoryPath,
+                            checkStartedUtc)
+                });
 
             if (!passed)
             {
