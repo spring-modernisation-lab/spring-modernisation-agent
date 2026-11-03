@@ -26,6 +26,8 @@ public interface IWorkspacePatchRecorder
 
 /// <param name="TreeId">The git tree id of the workspace snapshot.</param>
 /// <param name="Artifact">The patch written for this stage.</param>
+/// <param name="FullPath">Where the patch file was written.</param>
 public sealed record RecordedPatch(
     string TreeId,
-    PatchArtifact Artifact);
+    PatchArtifact Artifact,
+    string FullPath);

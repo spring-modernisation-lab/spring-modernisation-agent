@@ -1,5 +1,6 @@
 using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Remediation;
 using SpringModernisationAgent.Transformation;
 using SpringModernisationAgent.Workspace;
 
@@ -501,10 +502,15 @@ public class OpenRewriteExecutionCoordinatorTests
                 Assert.Equal(workspacePath, call.RepositoryPath);
                 Assert.Equal("customer-service", call.RepositoryName);
                 Assert.Equal(CommitSha, call.BaseRevision);
-
-                // Snapshots precede Maven, so build output can't leak in.
-                Assert.Equal(0, call.MavenCallsSoFar);
             });
+
+            // The OpenRewrite snapshot precedes Maven; the cumulative patch
+            // is taken last so it includes any remediation edits.
+            Assert.Equal(0, recorder.Calls[0].MavenCallsSoFar);
+            Assert.Equal(3, recorder.Calls[1].MavenCallsSoFar);
+
+            // Remediation was not enabled.
+            Assert.Null(result.Remediation);
         }
         finally
         {
@@ -623,12 +629,115 @@ public class OpenRewriteExecutionCoordinatorTests
         Assert.True(cleaner.Called);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_RemediationFixes_UsesFinalValidationAndOrdersPatches()
+    {
+        var mavenRunner = new FakeMavenProcessRunner(
+        [
+            new MavenProcessResult(1, "[ERROR] cannot find symbol", string.Empty)
+        ]);
+
+        var loop = new FakeRemediationLoop(RemediationOutcome.Fixed, passed: true);
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var coordinator = CreateCoordinator(
+                CreateWorkspaceProvider(workspacePath),
+                new FakeRepositoryWorkspaceCleaner(),
+                mavenProcessRunner: mavenRunner,
+                patchRecorder: new FakePatchRecorder(),
+                remediationLoop: loop);
+
+            var result = await coordinator.ExecuteAsync(
+                "spring-modernisation-lab",
+                CreateTransformationPlan());
+
+            // Maven's final result decides success.
+            Assert.True(result.Succeeded);
+            Assert.Equal(RemediationOutcome.Fixed, result.Remediation!.Outcome);
+
+            Assert.Equal(
+                ["01-openrewrite", "02-remediation-attempt-1", "cumulative"],
+                result.Patches.Select(patch => patch.Stage));
+
+            Assert.Equal("tree", loop.OpenRewriteTreeId);
+            Assert.Equal("/artifacts/patches/customer-service/01-openrewrite.patch", loop.OpenRewritePatchPath);
+            Assert.False(loop.Validation!.Passed);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RemediationEnabledButValidationPasses_ReportsNotNeededWithoutCallingTheLoop()
+    {
+        var loop = new FakeRemediationLoop(RemediationOutcome.Fixed, passed: true);
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var result = await CreateCoordinator(
+                    CreateWorkspaceProvider(workspacePath),
+                    new FakeRepositoryWorkspaceCleaner(),
+                    patchRecorder: new FakePatchRecorder(),
+                    remediationLoop: loop)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            Assert.True(result.Succeeded);
+            Assert.Equal(RemediationOutcome.NotNeeded, result.Remediation!.Outcome);
+            Assert.False(loop.Called);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RemediationEnabledButOpenRewritePatchMissing_DoesNotRemediate()
+    {
+        var mavenRunner = new FakeMavenProcessRunner(
+        [
+            new MavenProcessResult(1, "[ERROR] cannot find symbol", string.Empty)
+        ]);
+
+        var loop = new FakeRemediationLoop(RemediationOutcome.Fixed, passed: true);
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var result = await CreateCoordinator(
+                    CreateWorkspaceProvider(workspacePath),
+                    new FakeRepositoryWorkspaceCleaner(),
+                    mavenProcessRunner: mavenRunner,
+                    patchRecorder: new FakePatchRecorder
+                    {
+                        Exception = new InvalidOperationException("Git could not snapshot.")
+                    },
+                    remediationLoop: loop)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            // Unattributable edits are never made.
+            Assert.False(loop.Called);
+            Assert.False(result.Succeeded);
+            Assert.Equal(RemediationOutcome.Error, result.Remediation!.Outcome);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
     private static OpenRewriteExecutionCoordinator CreateCoordinator(
         IRepositoryWorkspaceProvider workspaceProvider,
         IRepositoryWorkspaceCleaner workspaceCleaner,
         IOpenRewriteRunner? openRewriteRunner = null,
         IMavenProcessRunner? mavenProcessRunner = null,
-        IWorkspacePatchRecorder? patchRecorder = null)
+        IWorkspacePatchRecorder? patchRecorder = null,
+        IRemediationLoop? remediationLoop = null)
     {
         var executionPlanBuilder =
             new OpenRewriteExecutionPlanBuilder();
@@ -649,7 +758,8 @@ public class OpenRewriteExecutionCoordinatorTests
             executionPlanBuilder,
             openRewriteRunner ?? new FakeOpenRewriteRunner(),
             transformationValidator,
-            patchRecorder ?? new FakePatchRecorder());
+            patchRecorder ?? new FakePatchRecorder(),
+            remediationLoop);
     }
 
     private static string CreateTemporaryDirectory()
@@ -861,6 +971,46 @@ public class OpenRewriteExecutionCoordinatorTests
         }
     }
 
+    private sealed class FakeRemediationLoop(
+        RemediationOutcome outcome,
+        bool passed)
+        : IRemediationLoop
+    {
+        public bool Called { get; private set; }
+
+        public string? OpenRewriteTreeId { get; private set; }
+
+        public string? OpenRewritePatchPath { get; private set; }
+
+        public TransformationValidationResult? Validation { get; private set; }
+
+        public Task<RemediationLoopResult> RunAsync(
+            TransformationPlan plan,
+            RepositoryWorkspace workspace,
+            string openRewriteTreeId,
+            string openRewritePatchPath,
+            TransformationValidationResult validation,
+            CancellationToken cancellationToken = default)
+        {
+            Called = true;
+            OpenRewriteTreeId = openRewriteTreeId;
+            OpenRewritePatchPath = openRewritePatchPath;
+            Validation = validation;
+
+            var final = validation with
+            {
+                Status = passed
+                    ? TransformationValidationStatus.Passed
+                    : TransformationValidationStatus.Failed
+            };
+
+            return Task.FromResult(new RemediationLoopResult(
+                new RemediationReport(outcome, []),
+                final,
+                [new PatchArtifact("02-remediation-attempt-1", "patches/customer-service/02.patch", "hash", ["A.java"])]));
+        }
+    }
+
     private sealed class FakePatchRecorder(
         FakeMavenProcessRunner? mavenRunner = null)
         : IWorkspacePatchRecorder
@@ -894,7 +1044,8 @@ public class OpenRewriteExecutionCoordinatorTests
                     Stage: stage,
                     RelativePath: $"patches/{repositoryName}/{stage}.patch",
                     Sha256: "hash",
-                    ChangedFiles: ["pom.xml"])));
+                    ChangedFiles: ["pom.xml"]),
+                FullPath: $"/artifacts/patches/{repositoryName}/{stage}.patch"));
         }
     }
 

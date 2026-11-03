@@ -191,6 +191,35 @@ public class GitWorkspacePatchRecorderTests : IDisposable
         Assert.Equal(["pom.xml"], recorded.Artifact.ChangedFiles);
     }
 
+    [Fact]
+    public async Task RecordAsync_BuildOutputWithoutGitignore_IsStillExcluded()
+    {
+        // Remediation attempts are recorded after Maven has already run.
+        var baseCommit = await CreateRepositoryAsync();
+
+        foreach (var directory in new[] { "target", Path.Combine("module", "target") })
+        {
+            Directory.CreateDirectory(Path.Combine(RepositoryPath, directory, "classes"));
+
+            await File.WriteAllTextAsync(
+                Path.Combine(RepositoryPath, directory, "classes", "App.class"),
+                "compiled");
+        }
+
+        await File.WriteAllTextAsync(
+            Path.Combine(RepositoryPath, "pom.xml"),
+            "<project>3.5.16</project>\n");
+
+        var recorded = await CreateRecorder().RecordAsync(
+            RepositoryPath,
+            "orders-service",
+            baseCommit,
+            "02-remediation-attempt-1");
+
+        Assert.Equal(["pom.xml"], recorded.Artifact.ChangedFiles);
+        Assert.True(File.Exists(recorded.FullPath));
+    }
+
     [Theory]
     [InlineData("..", "01-openrewrite")]
     [InlineData("orders/service", "01-openrewrite")]

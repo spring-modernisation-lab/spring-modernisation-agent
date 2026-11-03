@@ -135,24 +135,24 @@ Exposed to the model as Agent Framework function tools. All paths are relative, 
 
 ### 4.5 Loop (in the coordinator, between the OpenRewrite snapshot and cleanup)
 
-- [ ] Loop body:
+- [x] Loop body (`RemediationLoop`, behind `IRemediationLoop`; the coordinator records the OpenRewrite patch, validates, runs the loop on failure, then records the cumulative patch last):
   1. On validation failure, collect diagnostics.
   2. Ask for a proposal.
   3. Apply it.
   4. Snapshot (stage patch).
   5. Re-run the **same** fixed validation checks for the route.
-- [ ] Stop when any of these happens:
+- [x] Stop when any of these happens:
   - Validation passes.
   - The decision is `CannotFix` or `NeedsHumanDecision`.
   - **3 attempts** are used (configurable).
   - No progress: the same diagnostics as the previous attempt.
-- [ ] Final success is still `transformation succeeded && validation passed`. The AI's confidence is never consulted.
-- [ ] `TransformationExecutionResult` gains:
+- [x] Final success is still `transformation succeeded && validation passed`. The AI's confidence is never consulted.
+- [x] `TransformationExecutionResult` gains (as `Remediation`, null when not enabled; outcomes also include `NoProgress`):
   - `Remediation`: outcome `NotEnabled` | `NotNeeded` | `Fixed` | `CannotFix` | `NeedsHumanDecision` | `AttemptsExhausted` | `Error`;
   - `Attempts[]`, each with its proposal, applied/rejected status and reason, patch, validation result and token usage.
-- [ ] Wave gating is unchanged: anything except a passing validation blocks the next wave, including `NeedsHumanDecision`.
-- [ ] Remediation is **off unless** `MIGRATION_REMEDIATION=enabled`, set by a workflow input that defaults to off. An AI or auth error ends remediation with outcome `Error`, and the deterministic result stands.
-- [ ] Tests with a fake agent:
+- [x] Wave gating is unchanged: anything except a passing validation blocks the next wave, including `NeedsHumanDecision`.
+- [x] Remediation is **off unless** `MIGRATION_REMEDIATION=enabled`, set by a workflow input that defaults to off. An AI or auth error ends remediation with outcome `Error`, and the deterministic result stands.
+- [x] Tests with a fake agent:
   - Fixed in attempt 1.
   - Attempt 1 fails, attempt 2 passes.
   - `CannotFix`.
@@ -164,6 +164,10 @@ Exposed to the model as Agent Framework function tools. All paths are relative, 
   - Cancellation.
   - Cleanup always runs.
   - Disabled by default.
+
+- [x] The patch recorder now always excludes `**/target/**`, because remediation snapshots are taken after Maven has run (a repository without `target/` in `.gitignore` would otherwise leak build output).
+- [x] Workflow: a `remediation` checkbox (default off); Azure sign-in moved before the transform step; remediation is enabled only if the box is ticked **and** sign-in succeeded.
+- [ ] Results document: show the remediation attempts (Phase 6).
 
 ### 4.6 Development and verification
 

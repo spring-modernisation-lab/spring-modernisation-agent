@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Remediation;
 using SpringModernisationAgent.Transformation;
 using SpringModernisationAgent.Workspace;
 
@@ -186,6 +187,11 @@ public sealed class TransformCommand
                     $"({patch.ChangedFiles.Count} files, sha256 {patch.Sha256})");
             }
 
+            if (result.Remediation is not null)
+            {
+                WriteRemediation(result.Remediation);
+            }
+
             if (result.PatchRecordingError is not null)
             {
                 Console.WriteLine(
@@ -340,6 +346,16 @@ public sealed class TransformCommand
             new TransformationValidator(
                 mavenProcessRunner);
 
+        var patchRecorder =
+            new GitWorkspacePatchRecorder(
+                gitProcessRunner,
+                artifactsDirectory);
+
+        var remediationLoop =
+            CreateRemediationLoop(
+                patchRecorder,
+                transformationValidator);
+
         IOpenRewriteExecutionCoordinator executionCoordinator =
             new OpenRewriteExecutionCoordinator(
                 workspaceProvider,
@@ -347,14 +363,90 @@ public sealed class TransformCommand
                 new OpenRewriteExecutionPlanBuilder(),
                 openRewriteRunner,
                 transformationValidator,
-                new GitWorkspacePatchRecorder(
-                    gitProcessRunner,
-                    artifactsDirectory));
+                patchRecorder,
+                remediationLoop);
 
         return new MigrationWaveExecutor(
             wavePlanner,
             repositorySelector,
             executionCoordinator);
+    }
+
+    /// <summary>
+    /// Remediation changes code, so it runs only when MIGRATION_REMEDIATION
+    /// is exactly "enabled". Foundry settings are then required up front.
+    /// </summary>
+    private static IRemediationLoop? CreateRemediationLoop(
+        IWorkspacePatchRecorder patchRecorder,
+        TransformationValidator transformationValidator)
+    {
+        var setting =
+            Environment.GetEnvironmentVariable(
+                "MIGRATION_REMEDIATION");
+
+        if (!string.Equals(setting, "enabled", StringComparison.Ordinal))
+        {
+            Console.WriteLine(
+                "Remediation Agent: not enabled for this run.");
+
+            return null;
+        }
+
+        Console.WriteLine(
+            "Remediation Agent: enabled " +
+            $"(at most {RemediationLoop.DefaultMaxAttempts} attempts per repository).");
+
+        return new RemediationLoop(
+            RemediationAgentFactory.Create(),
+            new RemediationPatchApplier(),
+            patchRecorder,
+            transformationValidator);
+    }
+
+    private static void WriteRemediation(
+        RemediationReport remediation)
+    {
+        Console.WriteLine(
+            $"  Remediation: {remediation.Outcome}");
+
+        foreach (var attempt in remediation.Attempts)
+        {
+            var proposal = attempt.Proposal;
+
+            var status =
+                attempt.Error is not null ? $"error: {attempt.Error}"
+                : attempt.RejectionReason is not null ? $"rejected: {attempt.RejectionReason}"
+                : proposal is null ? "no proposal"
+                : proposal.Decision != RemediationDecision.Fix ? proposal.Decision.ToString()
+                : attempt.Validation?.Passed == true ? "applied; validation passed"
+                : "applied; validation still fails";
+
+            Console.WriteLine(
+                $"    Attempt {attempt.Number} ({attempt.FailedCheck}): {status}");
+
+            if (proposal is not null)
+            {
+                Console.WriteLine(
+                    $"      Diagnosis: {proposal.Diagnosis}");
+
+                foreach (var edit in proposal.Edits)
+                {
+                    Console.WriteLine(
+                        $"      Edit {edit.Path}: {edit.Rationale}");
+                }
+
+                foreach (var option in proposal.Options)
+                {
+                    Console.WriteLine(
+                        $"      Option: {option}");
+                }
+            }
+
+            Console.WriteLine(
+                $"      Tool calls: {attempt.ToolCalls.Count}; " +
+                $"tokens in/out: {attempt.InputTokens?.ToString() ?? "?"}/" +
+                $"{attempt.OutputTokens?.ToString() ?? "?"}");
+        }
     }
 
     private static string GetRequiredEnvironmentVariable(

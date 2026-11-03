@@ -2,6 +2,13 @@ name: Spring modernisation
 
 on:
   workflow_dispatch:
+    inputs:
+      remediation:
+        description: >-
+          Run the Remediation Agent on validation failures (Azure AI Foundry;
+          at most 3 attempts per repository, Maven still decides success)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -190,11 +197,28 @@ jobs:
         run: |
           test -f Artifacts/transformation-plans.json
 
+      # Used by the optional Remediation Agent and the AI results report. A
+      # failed sign-in disables both; deterministic migration still runs.
+      - name: Sign in to Azure (GitHub OIDC)
+        id: azure_login
+        if: vars.AZURE_CLIENT_ID != ''
+        continue-on-error: true
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Execute next eligible migration wave
         env:
           GITHUB_TOKEN: ${{ secrets.MIGRATION_GITHUB_TOKEN }}
           # The runner context is only available at step level.
           MIGRATION_WORKSPACE_ROOT: ${{ runner.temp }}/spring-modernisation-workspaces
+          # Remediation changes code, so it is off unless explicitly chosen.
+          MIGRATION_REMEDIATION: ${{ (inputs.remediation && steps.azure_login.outcome == 'success') && 'enabled' || 'disabled' }}
+          FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
+          FOUNDRY_MODEL: ${{ vars.FOUNDRY_MODEL }}
+          FOUNDRY_AUTH_MODE: AzureCli
         run: >
           dotnet run
           --project ./src/SpringModernisationAgent
@@ -206,16 +230,6 @@ jobs:
       # The AI results report is optional and read-only. It runs even when
       # validation failed (that is when it is most useful), and its failure
       # never changes the migration outcome.
-      - name: Sign in to Azure (GitHub OIDC)
-        id: azure_login
-        if: always() && vars.AZURE_CLIENT_ID != ''
-        continue-on-error: true
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
       - name: Generate AI migration results report
         if: always() && steps.azure_login.outcome == 'success'
         continue-on-error: true

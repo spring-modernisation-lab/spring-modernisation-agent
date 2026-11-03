@@ -39,9 +39,11 @@ public sealed partial class GitWorkspacePatchRecorder : IWorkspacePatchRecorder
         EnsureSafeName(repositoryName, nameof(repositoryName));
         EnsureSafeName(stage, nameof(stage));
 
+        // Build output never belongs in a patch, even when a repository's
+        // .gitignore does not exclude it (later stages run after Maven).
         await RunAsync(
             repositoryPath,
-            ["add", "-A"],
+            ["add", "-A", "--", ".", ":(exclude,glob)**/target/**"],
             "Git could not stage the workspace changes.",
             cancellationToken);
 
@@ -96,7 +98,8 @@ public sealed partial class GitWorkspacePatchRecorder : IWorkspacePatchRecorder
                 Stage: stage,
                 RelativePath: relativePath,
                 Sha256: sha256,
-                ChangedFiles: changedFiles));
+                ChangedFiles: changedFiles),
+            patchPath);
     }
 
     private async Task<string> RunAsync(

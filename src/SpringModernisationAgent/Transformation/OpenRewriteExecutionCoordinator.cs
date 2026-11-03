@@ -1,4 +1,5 @@
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Remediation;
 using SpringModernisationAgent.Workspace;
 
 namespace SpringModernisationAgent.Transformation;
@@ -11,6 +12,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly IOpenRewriteRunner _openRewriteRunner;
     private readonly TransformationValidator _transformationValidator;
     private readonly IWorkspacePatchRecorder _patchRecorder;
+    private readonly IRemediationLoop? _remediationLoop;
 
     public OpenRewriteExecutionCoordinator(
     IRepositoryWorkspaceProvider workspaceProvider,
@@ -18,7 +20,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     OpenRewriteExecutionPlanBuilder executionPlanBuilder,
     IOpenRewriteRunner openRewriteRunner,
     TransformationValidator transformationValidator,
-    IWorkspacePatchRecorder patchRecorder)
+    IWorkspacePatchRecorder patchRecorder,
+    IRemediationLoop? remediationLoop = null)
     {
         ArgumentNullException.ThrowIfNull(workspaceProvider);
         ArgumentNullException.ThrowIfNull(workspaceCleaner);
@@ -33,6 +36,9 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
         _openRewriteRunner = openRewriteRunner;
         _transformationValidator = transformationValidator;
         _patchRecorder = patchRecorder;
+
+        // Null means remediation is not enabled for this run.
+        _remediationLoop = remediationLoop;
     }
 
     public async Task<OpenRewriteExecutionPlan> CreateExecutionPlanAsync(
@@ -98,12 +104,11 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                         transformationPlan));
             }
 
-            // Record before validation so Maven build output can't leak
-            // into the patch.
-            var (patches, patchRecordingError) =
-                await RecordPatchesAsync(
-                    workspace,
-                    cancellationToken);
+            // Snapshot OpenRewrite's changes before Maven runs.
+            var (openRewrite, patchRecordingError) = await TryRecordAsync(
+                workspace,
+                "01-openrewrite",
+                cancellationToken);
 
             var validationResult =
                 await _transformationValidator.ValidateAsync(
@@ -111,12 +116,67 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                     workspace.RepositoryPath,
                     cancellationToken);
 
+            var patches = new List<PatchArtifact>();
+
+            if (openRewrite is not null)
+            {
+                patches.Add(openRewrite.Artifact);
+            }
+
+            RemediationReport? remediation = null;
+
+            if (_remediationLoop is not null)
+            {
+                if (validationResult.Passed)
+                {
+                    remediation = new RemediationReport(RemediationOutcome.NotNeeded, []);
+                }
+                else if (openRewrite is null)
+                {
+                    // Edits that could not be attributed are never made.
+                    remediation = new RemediationReport(RemediationOutcome.Error, []);
+                }
+                else
+                {
+                    var loop = await _remediationLoop.RunAsync(
+                        transformationPlan,
+                        workspace,
+                        openRewrite.TreeId,
+                        openRewrite.FullPath,
+                        validationResult,
+                        cancellationToken);
+
+                    // Maven's last result is the authoritative outcome.
+                    validationResult = loop.FinalValidation;
+                    patches.AddRange(loop.AttemptPatches);
+                    remediation = loop.Report;
+                }
+            }
+
+            // Taken last so it includes any remediation edits; this is the
+            // patch a draft pull request applies.
+            if (openRewrite is not null)
+            {
+                var (cumulative, cumulativeError) = await TryRecordAsync(
+                    workspace,
+                    "cumulative",
+                    cancellationToken);
+
+                if (cumulative is not null)
+                {
+                    patches.Add(cumulative.Artifact);
+                }
+
+                patchRecordingError ??= cumulativeError;
+            }
+
             return new TransformationExecutionResult(
                 Transformation: transformationResult,
                 Validation: validationResult)
             {
                 Patches = patches,
-                PatchRecordingError = patchRecordingError
+                PatchRecordingError = patchRecordingError,
+                Remediation = remediation
             };
         }
         finally
@@ -133,35 +193,29 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     /// <summary>
     /// A recording failure must not discard the migration and validation
     /// evidence, so it is reported on the result rather than thrown.
-    /// Cancellation still propagates.
+    /// Cancellation still propagates. Every stage is relative to the
+    /// source commit except remediation attempts, which the loop chains.
     /// </summary>
-    private async Task<(IReadOnlyList<PatchArtifact> Patches, string? Error)>
-        RecordPatchesAsync(
-            RepositoryWorkspace workspace,
-            CancellationToken cancellationToken)
+    private async Task<(RecordedPatch? Patch, string? Error)> TryRecordAsync(
+        RepositoryWorkspace workspace,
+        string stage,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var openRewrite = await _patchRecorder.RecordAsync(
+            var patch = await _patchRecorder.RecordAsync(
                 workspace.RepositoryPath,
                 workspace.RepositoryName,
                 workspace.CommitSha,
-                "01-openrewrite",
+                stage,
                 cancellationToken);
 
-            var cumulative = await _patchRecorder.RecordAsync(
-                workspace.RepositoryPath,
-                workspace.RepositoryName,
-                workspace.CommitSha,
-                "cumulative",
-                cancellationToken);
-
-            return ([openRewrite.Artifact, cumulative.Artifact], null);
+            return (patch, null);
         }
         catch (Exception exception)
             when (exception is not OperationCanceledException)
         {
-            return ([], exception.Message);
+            return (null, exception.Message);
         }
     }
 

@@ -21,4 +21,11 @@ public sealed record TransformationExecutionResult(
     /// pull request can be opened without a patch.
     /// </summary>
     public string? PatchRecordingError { get; init; }
+
+    /// <summary>
+    /// What the Remediation Agent did, or null when remediation was not
+    /// enabled for the run. It never overrides <see cref="Validation"/>,
+    /// which is always the final, authoritative Maven result.
+    /// </summary>
+    public RemediationReport? Remediation { get; init; }
 }

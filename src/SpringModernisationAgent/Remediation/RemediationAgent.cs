@@ -8,7 +8,7 @@ namespace SpringModernisationAgent.Remediation;
 /// strictly. It decides nothing itself: the patch applier enforces the
 /// edit guardrails and Maven decides whether a fix worked.
 /// </summary>
-public sealed class RemediationAgent
+public sealed class RemediationAgent : IRemediationAgent
 {
     internal const string Instructions =
         """
