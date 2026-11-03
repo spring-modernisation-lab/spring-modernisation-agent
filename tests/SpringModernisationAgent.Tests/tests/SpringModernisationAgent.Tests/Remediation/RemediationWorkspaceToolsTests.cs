@@ -243,6 +243,41 @@ public class RemediationWorkspaceToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task DescribeClass_ReturnsTheInspectorOutputAndIsRecorded()
+    {
+        var tools = new RemediationWorkspaceTools(
+            Repository,
+            openRewritePatch: "",
+            diagnostics: [],
+            classInspector: new FakeInspector("public class org.example.Foo { public void bar(int); }"));
+
+        var text = await tools.DescribeClass("org.example.Foo");
+
+        Assert.Contains("public void bar(int);", text);
+        Assert.Equal("describe_class", tools.Calls.Single().Tool);
+        Assert.Equal("org.example.Foo", tools.Calls.Single().Arguments);
+        Assert.True(tools.Calls.Single().Succeeded);
+    }
+
+    [Fact]
+    public async Task DescribeClass_WithoutAnInspector_SaysItIsUnavailable()
+    {
+        var tools = CreateTools();
+
+        var text = await tools.DescribeClass("org.example.Foo");
+
+        Assert.StartsWith("Error:", text);
+        Assert.Contains("unavailable", text);
+        Assert.False(tools.Calls.Single().Succeeded);
+    }
+
+    private sealed class FakeInspector(string output) : IJavaClassInspector
+    {
+        public Task<string> DescribeAsync(string className, CancellationToken cancellationToken = default) =>
+            Task.FromResult(output);
+    }
+
+    [Fact]
     public void EveryCall_IsRecorded()
     {
         var tools = CreateTools();
@@ -318,7 +353,7 @@ public class RemediationWorkspaceToolsTests : IDisposable
         var names = CreateTools().AsAITools().Select(tool => tool.Name).Order();
 
         Assert.Equal(
-            ["get_diagnostics", "get_openrewrite_patch", "list_files", "preview_edits", "read_file", "search_source"],
+            ["describe_class", "get_diagnostics", "get_openrewrite_patch", "list_files", "preview_edits", "read_file", "search_source"],
             names);
     }
 

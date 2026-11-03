@@ -366,6 +366,7 @@ public sealed class TransformCommand
             CreateRemediationLoop(
                 patchRecorder,
                 transformationValidator,
+                mavenProcessRunner,
                 progress);
 
         IOpenRewriteExecutionCoordinator executionCoordinator =
@@ -392,6 +393,7 @@ public sealed class TransformCommand
     private static IRemediationLoop? CreateRemediationLoop(
         IWorkspacePatchRecorder patchRecorder,
         TransformationValidator transformationValidator,
+        IMavenProcessRunner mavenProcessRunner,
         IMigrationProgress progress)
     {
         var setting =
@@ -406,17 +408,25 @@ public sealed class TransformCommand
             return null;
         }
 
+        var maxAttempts =
+            RemediationSettings.ParseMaxAttempts(
+                Environment.GetEnvironmentVariable(
+                    "MIGRATION_REMEDIATION_MAX_ATTEMPTS"));
+
         Console.WriteLine(
             "Remediation Agent: enabled " +
-            $"(at most {RemediationLoop.DefaultMaxAttempts} attempts per repository).");
+            $"(at most {maxAttempts} attempts per repository).");
 
         return new RemediationLoop(
             RemediationAgentFactory.Create(),
             new RemediationPatchApplier(),
             patchRecorder,
             transformationValidator,
-            RemediationLoop.DefaultMaxAttempts,
-            progress);
+            maxAttempts,
+            progress,
+            new MavenClassInspectorFactory(
+                mavenProcessRunner,
+                new JavapRunner()));
     }
 
     private static void WriteRemediation(

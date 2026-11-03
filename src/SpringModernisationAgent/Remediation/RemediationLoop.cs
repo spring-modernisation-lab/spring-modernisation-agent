@@ -23,6 +23,7 @@ public sealed class RemediationLoop : IRemediationLoop
     private readonly TransformationValidator _validator;
     private readonly int _maxAttempts;
     private readonly IMigrationProgress _progress;
+    private readonly IJavaClassInspectorFactory? _classInspectorFactory;
 
     public RemediationLoop(
         IRemediationAgent agent,
@@ -30,7 +31,8 @@ public sealed class RemediationLoop : IRemediationLoop
         IWorkspacePatchRecorder patchRecorder,
         TransformationValidator validator,
         int maxAttempts = DefaultMaxAttempts,
-        IMigrationProgress? progress = null)
+        IMigrationProgress? progress = null,
+        IJavaClassInspectorFactory? classInspectorFactory = null)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(applier);
@@ -44,6 +46,7 @@ public sealed class RemediationLoop : IRemediationLoop
         _validator = validator;
         _maxAttempts = maxAttempts;
         _progress = progress ?? NullMigrationProgress.Instance;
+        _classInspectorFactory = classInspectorFactory;
     }
 
     public async Task<RemediationLoopResult> RunAsync(
@@ -95,6 +98,9 @@ public sealed class RemediationLoop : IRemediationLoop
             ? await File.ReadAllTextAsync(openRewritePatchPath, cancellationToken)
             : string.Empty;
 
+        // Resolved once: the dependencies do not change between attempts.
+        var classInspector = await CreateClassInspectorAsync(plan, workspace, cancellationToken);
+
         for (var number = 1; number <= _maxAttempts; number++)
         {
             var failedCheck = run.Validation.Checks.FirstOrDefault(check => !check.Passed);
@@ -110,7 +116,8 @@ public sealed class RemediationLoop : IRemediationLoop
             var tools = new RemediationWorkspaceTools(
                 workspace.RepositoryPath,
                 openRewritePatch,
-                diagnostics);
+                diagnostics,
+                classInspector: classInspector);
 
             var request = new RemediationRequest(
                 RepositoryName: plan.RepositoryName,
@@ -271,6 +278,41 @@ public sealed class RemediationLoop : IRemediationLoop
         }
 
         return run.Finish(RemediationOutcome.AttemptsExhausted);
+    }
+
+    /// <summary>
+    /// Class descriptions are a help, not a requirement: if the classpath
+    /// cannot be resolved the agent works without them.
+    /// </summary>
+    private async Task<IJavaClassInspector?> CreateClassInspectorAsync(
+        TransformationPlan plan,
+        RepositoryWorkspace workspace,
+        CancellationToken cancellationToken)
+    {
+        if (_classInspectorFactory is null)
+        {
+            return null;
+        }
+
+        IJavaClassInspector? inspector;
+
+        try
+        {
+            inspector = await _classInspectorFactory.CreateAsync(workspace.RepositoryPath, cancellationToken);
+        }
+        catch (Exception exception)
+            when (exception is not OperationCanceledException)
+        {
+            inspector = null;
+        }
+
+        _progress.Report(
+            plan.RepositoryName,
+            inspector is null
+                ? "class descriptions: unavailable (dependency classpath could not be resolved)"
+                : "class descriptions: available from the dependency classpath");
+
+        return inspector;
     }
 
     // "3 edits (2 whole-file rewrites, 1 search and replace)"

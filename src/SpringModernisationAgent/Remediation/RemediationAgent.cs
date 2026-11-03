@@ -22,6 +22,10 @@ public sealed class RemediationAgent : IRemediationAgent
         - You can only read, through the tools. Read a file before you
           propose an edit to it. Files do not change while you work, so
           read each file once and refer back to what you read.
+        - Before you use a library constructor or method you are not
+          certain of, call describe_class with its fully qualified class
+          name and use the exact signature it shows; never guess
+          signatures or parameter types.
         - Before you answer, call preview_edits once with the
           whole set of edits you intend to propose, and read the resulting
           files in full. Fix anything that would not compile or that changes

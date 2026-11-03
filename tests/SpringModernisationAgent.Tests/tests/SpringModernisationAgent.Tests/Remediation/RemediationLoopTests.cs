@@ -90,6 +90,38 @@ public class RemediationLoopTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_BuildsClassDescriptionsOnceForTheWholeRun()
+    {
+        var agent = new FakeAgent(
+            Fix("class Missing", "class Found"),
+            Fix(" extends WebSecurityConfigurerAdapter", ""));
+
+        var factory = new CountingInspectorFactory();
+
+        await new RemediationLoop(
+                agent,
+                new RemediationPatchApplier(),
+                new FakeRecorder(),
+                new TransformationValidator(new FakeMaven(Passed(), Passed(), Passed())),
+                classInspectorFactory: factory)
+            .RunAsync(CreatePlan(), CreateWorkspace(), "tree-openrewrite", OpenRewritePatchPath, FailedCompile());
+
+        Assert.Equal(1, factory.Calls);
+        Assert.Equal(2, agent.Requests.Count);
+    }
+
+    private sealed class CountingInspectorFactory : IJavaClassInspectorFactory
+    {
+        public int Calls { get; private set; }
+
+        public Task<IJavaClassInspector?> CreateAsync(string repositoryPath, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult<IJavaClassInspector?>(null);
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_SecondAttemptFixes_ChainsPatchesAndFeedsBackTheNewFailure()
     {
         var agent = new FakeAgent(

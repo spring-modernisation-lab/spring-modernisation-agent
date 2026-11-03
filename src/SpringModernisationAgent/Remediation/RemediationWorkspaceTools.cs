@@ -42,6 +42,7 @@ public sealed class RemediationWorkspaceTools
     private readonly string _openRewritePatch;
     private readonly IReadOnlyList<string> _diagnostics;
     private readonly int _maxCalls;
+    private readonly IJavaClassInspector? _classInspector;
     private readonly List<RemediationToolCall> _calls = [];
     private readonly Lock _gate = new();
 
@@ -49,7 +50,8 @@ public sealed class RemediationWorkspaceTools
         string repositoryPath,
         string openRewritePatch,
         IReadOnlyList<string> diagnostics,
-        int maxCalls = DefaultMaxCalls)
+        int maxCalls = DefaultMaxCalls,
+        IJavaClassInspector? classInspector = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
         ArgumentNullException.ThrowIfNull(openRewritePatch);
@@ -60,6 +62,7 @@ public sealed class RemediationWorkspaceTools
         _openRewritePatch = openRewritePatch;
         _diagnostics = diagnostics;
         _maxCalls = maxCalls;
+        _classInspector = classInspector;
     }
 
     public IReadOnlyList<RemediationToolCall> Calls
@@ -95,6 +98,11 @@ public sealed class RemediationWorkspaceTools
             GetDiagnostics,
             "get_diagnostics",
             "The current validation diagnostics: failing tests and build errors."),
+        AIFunctionFactory.Create(
+            DescribeClass,
+            "describe_class",
+            "Show the public constructors, methods and fields of a library class on the project's " +
+            "real dependencies (fully qualified name). Use it to check a signature instead of guessing."),
         AIFunctionFactory.Create(
             PreviewEdits,
             "preview_edits",
@@ -261,6 +269,35 @@ public sealed class RemediationWorkspaceTools
         });
     }
 
+    public async Task<string> DescribeClass(
+        [Description("Fully qualified class name, e.g. org.apache.hc.client5.http.impl.classic.HttpClientBuilder")] string className)
+    {
+        var refusal = Refuse("describe_class", className);
+
+        if (refusal is not null)
+        {
+            return refusal;
+        }
+
+        var result = _classInspector is null
+            ? Fail("class descriptions are unavailable in this run; rely on the diagnostics and the code.")
+            : await DescribeWithInspectorAsync(_classInspector, className);
+
+        Record("describe_class", className, result);
+        return result.Text;
+    }
+
+    private static async Task<ToolResult> DescribeWithInspectorAsync(
+        IJavaClassInspector inspector,
+        string className)
+    {
+        var text = await inspector.DescribeAsync(className);
+
+        return text.StartsWith("Error:", StringComparison.Ordinal)
+            ? new ToolResult(text, Succeeded: false)
+            : Ok(text);
+    }
+
     public string GetOpenRewritePatch() =>
         Run("get_openrewrite_patch", string.Empty, () => Ok(BoundEvidence(_openRewritePatch)));
 
@@ -272,28 +309,11 @@ public sealed class RemediationWorkspaceTools
         string arguments,
         Func<ToolResult> action)
     {
-        // Previews have their own allowance, so running out of exploration
-        // calls never stops the agent checking its edits before answering.
-        lock (_gate)
+        var refusal = Refuse(tool, arguments);
+
+        if (refusal is not null)
         {
-            var isPreview = tool == "preview_edits";
-
-            var used = _calls.Count(call =>
-                (call.Tool == "preview_edits") == isPreview);
-
-            var refusal =
-                isPreview && used >= MaxPreviews
-                    ? $"Error: preview limit of {MaxPreviews} reached; return your proposal now."
-                : !isPreview && used >= _maxCalls
-                    ? $"Error: tool call budget of {_maxCalls} calls is used up; " +
-                      "check your edits with preview_edits, then return your proposal."
-                : null;
-
-            if (refusal is not null)
-            {
-                _calls.Add(new RemediationToolCall(tool, arguments, Succeeded: false));
-                return refusal;
-            }
+            return refusal;
         }
 
         ToolResult result;
@@ -312,12 +332,52 @@ public sealed class RemediationWorkspaceTools
             result = Fail("the file could not be read.");
         }
 
+        Record(tool, arguments, result);
+        return result.Text;
+    }
+
+    private void Record(
+        string tool,
+        string arguments,
+        ToolResult result)
+    {
         lock (_gate)
         {
             _calls.Add(new RemediationToolCall(tool, arguments, result.Succeeded));
         }
+    }
 
-        return result.Text;
+    /// <summary>
+    /// Returns a refusal (and records it) when the call's allowance is used
+    /// up. Previews have their own allowance, so running out of exploration
+    /// calls never stops the agent checking its edits before answering.
+    /// </summary>
+    private string? Refuse(
+        string tool,
+        string arguments)
+    {
+        lock (_gate)
+        {
+            var isPreview = tool == "preview_edits";
+
+            var used = _calls.Count(call =>
+                (call.Tool == "preview_edits") == isPreview);
+
+            var refusal =
+                isPreview && used >= MaxPreviews
+                    ? $"Error: preview limit of {MaxPreviews} reached; return your proposal now."
+                : !isPreview && used >= _maxCalls
+                    ? $"Error: tool call budget of {_maxCalls} calls is used up; " +
+                      "check your edits with preview_edits, then return your proposal."
+                : null;
+
+            if (refusal is not null)
+            {
+                _calls.Add(new RemediationToolCall(tool, arguments, Succeeded: false));
+            }
+
+            return refusal;
+        }
     }
 
     private string ResolveFile(
