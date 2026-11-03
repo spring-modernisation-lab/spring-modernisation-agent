@@ -170,7 +170,12 @@ public sealed class RemediationLoop : IRemediationLoop
                 when (exception is not OperationCanceledException)
             {
                 // Without the patch the change cannot be attributed or reviewed.
-                run.Add(attempt with { Applied = true, Error = $"Patch recording failed: {exception.Message}" });
+                run.Add(attempt with
+                {
+                    Applied = true,
+                    AppliedEdits = applied.AppliedEdits,
+                    Error = $"Patch recording failed: {exception.Message}"
+                });
                 return run.Finish(RemediationOutcome.Error);
             }
 
@@ -179,7 +184,13 @@ public sealed class RemediationLoop : IRemediationLoop
 
             var next = await _validator.ValidateAsync(plan, workspace.RepositoryPath, cancellationToken);
 
-            run.Add(attempt with { Applied = true, Patch = patch.Artifact, Validation = next });
+            run.Add(attempt with
+            {
+                Applied = true,
+                AppliedEdits = applied.AppliedEdits,
+                Patch = patch.Artifact,
+                Validation = next
+            });
             run.Validation = next;
 
             if (next.Passed)

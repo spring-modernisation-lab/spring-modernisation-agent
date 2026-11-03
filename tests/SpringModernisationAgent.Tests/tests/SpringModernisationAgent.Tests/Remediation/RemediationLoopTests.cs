@@ -52,6 +52,10 @@ public class RemediationLoopTests : IDisposable
         Assert.Equal(1000, attempt.InputTokens);
         Assert.Equal("02-remediation-attempt-1", attempt.Patch!.Stage);
 
+        var applied = Assert.Single(attempt.AppliedEdits);
+        Assert.Equal(SecurityPath, applied.Path);
+        Assert.Equal(RemediationEditKind.SearchReplace, applied.Kind);
+
         Assert.Equal(["02-remediation-attempt-1"], result.AttemptPatches.Select(patch => patch.Stage));
         Assert.Equal("tree-openrewrite", recorder.Calls.Single().BaseRevision);
 

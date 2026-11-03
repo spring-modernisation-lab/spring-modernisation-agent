@@ -40,6 +40,7 @@ public class RemediationAgentTests
         Assert.Contains("read each file once", model.Instructions);
         Assert.Contains("existing import line", model.Instructions);
         Assert.Contains("complete new content", model.Instructions);
+        Assert.Contains("files of up to 400 lines", model.Instructions);
         Assert.Contains("whole set of edits", model.Instructions);
     }
 

@@ -58,4 +58,8 @@ public sealed record RemediationAttemptRecord(
     TransformationValidationResult? Validation,
     IReadOnlyList<RemediationToolCall> ToolCalls,
     long? InputTokens,
-    long? OutputTokens);
+    long? OutputTokens)
+{
+    /// <summary>What each applied edit did, in proposal order; empty if not applied.</summary>
+    public IReadOnlyList<AppliedEdit> AppliedEdits { get; init; } = [];
+}

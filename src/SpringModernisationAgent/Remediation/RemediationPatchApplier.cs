@@ -21,6 +21,9 @@ public sealed class RemediationPatchApplier
 
     public const int MaxChangedLines = 300;
 
+    /// <summary>Larger files must be changed with search-and-replace edits.</summary>
+    public const int MaxWholeFileLines = 400;
+
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".java", ".kt", ".properties", ".yml", ".yaml"
@@ -35,7 +38,7 @@ public sealed class RemediationPatchApplier
         string repositoryPath,
         IReadOnlyList<RemediationEdit> edits)
     {
-        var (pending, rejection) = Prepare(repositoryPath, edits);
+        var (pending, appliedEdits, rejection) = Prepare(repositoryPath, edits);
 
         if (pending is null)
         {
@@ -50,7 +53,10 @@ public sealed class RemediationPatchApplier
         return new RemediationApplyResult(
             Applied: true,
             RejectionReason: null,
-            ChangedFiles: pending.Keys.Order(StringComparer.Ordinal).ToList());
+            ChangedFiles: pending.Keys.Order(StringComparer.Ordinal).ToList())
+        {
+            AppliedEdits = appliedEdits
+        };
     }
 
     /// <summary>
@@ -62,7 +68,7 @@ public sealed class RemediationPatchApplier
         string repositoryPath,
         IReadOnlyList<RemediationEdit> edits)
     {
-        var (pending, rejection) = Prepare(repositoryPath, edits);
+        var (pending, _, rejection) = Prepare(repositoryPath, edits);
 
         return pending is null
             ? new RemediationPreviewResult(false, rejection, new Dictionary<string, string>())
@@ -73,7 +79,7 @@ public sealed class RemediationPatchApplier
     }
 
     /// <summary>Checks every edit and computes the new contents in memory.</summary>
-    private static (Dictionary<string, PendingFile>? Pending, string? Rejection) Prepare(
+    private static (Dictionary<string, PendingFile>? Pending, List<AppliedEdit> Edits, string? Rejection) Prepare(
         string repositoryPath,
         IReadOnlyList<RemediationEdit> edits)
     {
@@ -84,12 +90,13 @@ public sealed class RemediationPatchApplier
 
         if (edits.Count == 0)
         {
-            return (null, "the proposal contains no edits.");
+            return (null, [], "the proposal contains no edits.");
         }
 
         // Insertion order is first-seen order.
         var pending = new Dictionary<string, PendingFile>(StringComparer.Ordinal);
         var changedLines = 0;
+        var appliedEdits = new List<AppliedEdit>();
 
         for (var index = 0; index < edits.Count; index++)
         {
@@ -99,7 +106,7 @@ public sealed class RemediationPatchApplier
 
             if (pathError is not null)
             {
-                return (null, $"{label}: {pathError}");
+                return (null, [], $"{label}: {pathError}");
             }
 
             var relativePath = Normalise(edit.Path);
@@ -107,12 +114,12 @@ public sealed class RemediationPatchApplier
 
             if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             {
-                return (null, $"{label}: the path is outside the repository.");
+                return (null, [], $"{label}: the path is outside the repository.");
             }
 
             if (PassesThroughLink(root, relativePath))
             {
-                return (null, $"{label}: links are not followed.");
+                return (null, [], $"{label}: links are not followed.");
             }
 
             if (!pending.TryGetValue(relativePath, out var file))
@@ -121,28 +128,29 @@ public sealed class RemediationPatchApplier
                 pending[relativePath] = file;
             }
 
-            var (editError, editChangedLines) = file.ApplyEdit(edit);
+            var (editError, editChangedLines, kind) = file.ApplyEdit(edit);
 
             if (editError is not null)
             {
-                return (null, $"{label}: {editError}");
+                return (null, [], $"{label}: {editError}");
             }
 
             changedLines += editChangedLines;
+            appliedEdits.Add(new AppliedEdit(relativePath, kind, editChangedLines));
         }
 
         if (pending.Count > MaxFiles)
         {
-            return (null, $"a proposal may change at most {MaxFiles} files; this one changes {pending.Count}.");
+            return (null, [], $"a proposal may change at most {MaxFiles} files; this one changes {pending.Count}.");
         }
 
         if (changedLines > MaxChangedLines)
         {
-            return (null,
+            return (null, [],
                 $"a proposal may change at most {MaxChangedLines} lines; this one changes about {changedLines}.");
         }
 
-        return (pending, null);
+        return (pending, appliedEdits, null);
     }
 
     private static string? CheckPath(
@@ -283,7 +291,7 @@ public sealed class RemediationPatchApplier
         /// replacement is the file's complete new content (creating the file
         /// if it does not exist). Returns the number of changed lines.
         /// </summary>
-        public (string? Error, int ChangedLines) ApplyEdit(
+        public (string? Error, int ChangedLines, RemediationEditKind Kind) ApplyEdit(
             RemediationEdit edit)
         {
             var search = edit.Search ?? string.Empty;
@@ -298,35 +306,50 @@ public sealed class RemediationPatchApplier
 
             if (search.Length == 0)
             {
+                var kind = _existed
+                    ? RemediationEditKind.WholeFileRewrite
+                    : RemediationEditKind.NewFile;
+
                 if (replace.Length == 0)
                 {
-                    return ("a whole-file edit needs the file's complete new content.", 0);
+                    return ("a whole-file edit needs the file's complete new content.", 0, kind);
+                }
+
+                var currentLines = CountLines(_content ?? string.Empty);
+
+                if (_existed && currentLines > MaxWholeFileLines)
+                {
+                    return (
+                        $"whole-file edits are allowed only for files of up to {MaxWholeFileLines} lines; " +
+                        $"this file has {currentLines}. Use search-and-replace edits instead.",
+                        0,
+                        kind);
                 }
 
                 var changed = CountChangedLines(_content ?? string.Empty, replace);
                 _content = replace;
-                return (null, changed);
+                return (null, changed, kind);
             }
 
             if (_content is null)
             {
-                return ("the file does not exist; use an empty search text to create it.", 0);
+                return ("the file does not exist; use an empty search text to create it.", 0, RemediationEditKind.SearchReplace);
             }
 
             var first = _content.IndexOf(search, StringComparison.Ordinal);
 
             if (first < 0)
             {
-                return ("the search text was not found; read the file again and copy it exactly.", 0);
+                return ("the search text was not found; read the file again and copy it exactly.", 0, RemediationEditKind.SearchReplace);
             }
 
             if (_content.IndexOf(search, first + 1, StringComparison.Ordinal) >= 0)
             {
-                return ("the search text matches more than once; include more surrounding lines.", 0);
+                return ("the search text matches more than once; include more surrounding lines.", 0, RemediationEditKind.SearchReplace);
             }
 
             _content = string.Concat(_content.AsSpan(0, first), replace, _content.AsSpan(first + search.Length));
-            return (null, Math.Max(CountLines(search), CountLines(replace)));
+            return (null, Math.Max(CountLines(search), CountLines(replace)), RemediationEditKind.SearchReplace);
         }
 
         /// <summary>

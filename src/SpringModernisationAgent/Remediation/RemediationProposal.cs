@@ -47,7 +47,36 @@ public sealed record RemediationEdit(
 public sealed record RemediationApplyResult(
     bool Applied,
     string? RejectionReason,
-    IReadOnlyList<string> ChangedFiles);
+    IReadOnlyList<string> ChangedFiles)
+{
+    /// <summary>What each edit did, in proposal order; empty when rejected.</summary>
+    public IReadOnlyList<AppliedEdit> AppliedEdits { get; init; } = [];
+}
+
+/// <summary>
+/// The kind of an edit, decided by the applier from the edit's shape and
+/// the workspace (never from the model's description of it).
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<RemediationEditKind>))]
+public enum RemediationEditKind
+{
+    /// <summary>An exact search text replaced once.</summary>
+    SearchReplace,
+
+    /// <summary>An existing file's complete content replaced.</summary>
+    WholeFileRewrite,
+
+    /// <summary>A file that did not exist was created.</summary>
+    NewFile
+}
+
+/// <param name="Path">Repository-relative path, normalised.</param>
+/// <param name="Kind">What the edit did.</param>
+/// <param name="ChangedLines">Lines the edit actually changed.</param>
+public sealed record AppliedEdit(
+    string Path,
+    RemediationEditKind Kind,
+    int ChangedLines);
 
 /// <param name="Accepted">True if every edit passed every guardrail.</param>
 /// <param name="RejectionReason">Why the edits would be rejected, if they would.</param>

@@ -74,6 +74,70 @@ public class RemediationPatchApplierTests : IDisposable
     }
 
     [Fact]
+    public void Apply_RecordsTheKindAndChangedLinesOfEveryEditInOrder()
+    {
+        const string newPath = "src/main/java/com/example/persistence/MoneyType.java";
+
+        var result = Apply(
+            Edit(ClientPath, "builder.setMaxConnTotal(20);", "manager.setMaxTotal(20);"),
+            Edit(SecurityPath, string.Empty, SecuritySource.Replace(" extends WebSecurityConfigurerAdapter", string.Empty)),
+            Edit(newPath, string.Empty, "class MoneyType {\n}\n"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+
+        Assert.Collection(
+            result.AppliedEdits,
+            edit =>
+            {
+                Assert.Equal(ClientPath, edit.Path);
+                Assert.Equal(RemediationEditKind.SearchReplace, edit.Kind);
+                Assert.Equal(1, edit.ChangedLines);
+            },
+            edit =>
+            {
+                Assert.Equal(SecurityPath, edit.Path);
+                Assert.Equal(RemediationEditKind.WholeFileRewrite, edit.Kind);
+
+                // One line removed, one added.
+                Assert.Equal(2, edit.ChangedLines);
+            },
+            edit =>
+            {
+                Assert.Equal(newPath, edit.Path);
+                Assert.Equal(RemediationEditKind.NewFile, edit.Kind);
+            });
+    }
+
+    [Fact]
+    public void Apply_Rejected_RecordsNoEdits()
+    {
+        var result = Apply(Edit(SecurityPath, "class Missing", "class Found"));
+
+        Assert.False(result.Applied);
+        Assert.Empty(result.AppliedEdits);
+    }
+
+    [Fact]
+    public void Apply_WholeFileRewriteOfALargeFile_IsRejectedButSearchReplaceIsAllowed()
+    {
+        const string path = "src/main/java/Large.java";
+        var lines = Enumerable.Range(1, RemediationPatchApplier.MaxWholeFileLines + 1)
+            .Select(index => $"int field{index};");
+
+        Write(path, string.Join("\n", lines) + "\n");
+
+        var rewrite = Apply(Edit(path, string.Empty, "int replaced;\n"));
+
+        Assert.False(rewrite.Applied);
+        Assert.Contains($"up to {RemediationPatchApplier.MaxWholeFileLines} lines", rewrite.RejectionReason);
+        Assert.Contains("search-and-replace", rewrite.RejectionReason);
+
+        var fragment = Apply(Edit(path, "int field7;", "long field7;"));
+
+        Assert.True(fragment.Applied, fragment.RejectionReason);
+    }
+
+    [Fact]
     public void Apply_ResourceFile_IsAllowed()
     {
         var result = Apply(

@@ -429,10 +429,17 @@ public sealed class TransformCommand
                 Console.WriteLine(
                     $"      Diagnosis: {proposal.Diagnosis}");
 
-                foreach (var edit in proposal.Edits)
+                for (var index = 0; index < proposal.Edits.Count; index++)
                 {
+                    var edit = proposal.Edits[index];
+
+                    var applied = index < attempt.AppliedEdits.Count
+                        ? $" ({DescribeKind(attempt.AppliedEdits[index].Kind)}, " +
+                          $"{attempt.AppliedEdits[index].ChangedLines} lines changed)"
+                        : string.Empty;
+
                     Console.WriteLine(
-                        $"      Edit {edit.Path}: {edit.Rationale}");
+                        $"      Edit {edit.Path}{applied}: {edit.Rationale}");
                 }
 
                 foreach (var option in proposal.Options)
@@ -448,6 +455,15 @@ public sealed class TransformCommand
                 $"{attempt.OutputTokens?.ToString() ?? "?"}");
         }
     }
+
+    private static string DescribeKind(
+        RemediationEditKind kind) =>
+        kind switch
+        {
+            RemediationEditKind.WholeFileRewrite => "whole-file rewrite",
+            RemediationEditKind.NewFile => "new file",
+            _ => "search and replace"
+        };
 
     private static string GetRequiredEnvironmentVariable(
         string name)

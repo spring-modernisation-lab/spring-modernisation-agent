@@ -36,7 +36,8 @@ public sealed class RemediationAgent : IRemediationAgent
            files are read-only.
         2. There are two kinds of edit:
            - Whole file (preferred whenever you change more than a few lines
-             of a file): an empty search text, with the file's
+             of a file; only for files of up to 400 lines): an empty search
+             text, with the file's
              complete new content as the replacement. Write the entire file,
              every line, not only the parts that change.
            - Search and replace (for a small, local change): copy the search
