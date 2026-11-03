@@ -77,6 +77,11 @@ public sealed class RemediationAgent : IRemediationAgent
            UserType<T> interface), Apache HttpClient 5 and the jakarta.*
            namespace.
 
+        8. Do not add new classes, interfaces, records or enums; change the
+           existing ones. Writing a new component is a design decision.
+        9. Code under src/main must not refer to test files or special-case
+           tests in any way.
+
         Decisions:
         - Fix: edits that should make validation pass.
         - NeedsHumanDecision: the only fix would change an external contract

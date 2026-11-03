@@ -65,23 +65,23 @@ public class RemediationPatchApplierTests : IDisposable
     [Fact]
     public void Apply_NewFileUnderSrcMain_IsCreated()
     {
-        const string path = "src/main/java/com/example/persistence/MoneyType.java";
+        const string path = "src/main/resources/application-production.yml";
 
-        var result = Apply(Edit(path, string.Empty, "class MoneyType {}\n"));
+        var result = Apply(Edit(path, string.Empty, "spring:\n  cache:\n    type: caffeine\n"));
 
         Assert.True(result.Applied, result.RejectionReason);
-        Assert.Equal("class MoneyType {}\n", Read(path));
+        Assert.Equal("spring:\n  cache:\n    type: caffeine\n", Read(path));
     }
 
     [Fact]
     public void Apply_RecordsTheKindAndChangedLinesOfEveryEditInOrder()
     {
-        const string newPath = "src/main/java/com/example/persistence/MoneyType.java";
+        const string newPath = "src/main/resources/cache.properties";
 
         var result = Apply(
             Edit(ClientPath, "builder.setMaxConnTotal(20);", "manager.setMaxTotal(20);"),
             Edit(SecurityPath, string.Empty, SecuritySource.Replace(" extends WebSecurityConfigurerAdapter", string.Empty)),
-            Edit(newPath, string.Empty, "class MoneyType {\n}\n"));
+            Edit(newPath, string.Empty, "cache.ttl=30\n"));
 
         Assert.True(result.Applied, result.RejectionReason);
 
@@ -135,6 +135,70 @@ public class RemediationPatchApplierTests : IDisposable
         var fragment = Apply(Edit(path, "int field7;", "long field7;"));
 
         Assert.True(fragment.Applied, fragment.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_NewTypeInAnExistingFile_IsRejected()
+    {
+        var result = Apply(Edit(
+            SecurityPath,
+            "    void configure() {}\n",
+            "    void configure() {}\n\n    private static class ExpiringCache implements Cache {\n    }\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("adds new types (ExpiringCache)", result.RejectionReason);
+        Assert.Contains("design decision", result.RejectionReason);
+        Assert.Equal(SecuritySource, Read(SecurityPath));
+    }
+
+    [Fact]
+    public void Apply_NewJavaFileDeclaringAType_IsRejected()
+    {
+        var result = Apply(Edit(
+            "src/main/java/com/example/persistence/MoneyConverter.java",
+            string.Empty,
+            "package com.example.persistence;\n\npublic record MoneyConverter(String value) {}\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("adds new types (MoneyConverter)", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_RewritingAFileThatKeepsItsTypes_IsAllowed()
+    {
+        var result = Apply(Edit(
+            SecurityPath,
+            string.Empty,
+            "package com.example.config;\n\npublic class SecurityConfiguration {\n    // Comments may say class Anything.\n}\n"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_ProductionCodeReferringToATestFile_IsRejected()
+    {
+        Write("src/test/resources/ehcache-test.xml", "<ehcache/>\n");
+
+        var result = Apply(Edit(
+            ClientPath,
+            "builder.setMaxConnTotal(20);",
+            "if (config.contains(\"ehcache-test.xml\")) { builder.setMaxConnTotal(1); }"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("refers to test files (ehcache-test.xml)", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_ReferringToAFileNameThatAlsoExistsInMain_IsAllowed()
+    {
+        Write("src/test/resources/application.yml", "spring: {}\n");
+
+        var result = Apply(Edit(
+            ClientPath,
+            "builder.setMaxConnTotal(20);",
+            "builder.setMaxConnTotal(20); // see application.yml"));
+
+        Assert.True(result.Applied, result.RejectionReason);
     }
 
     [Fact]
@@ -231,10 +295,10 @@ public class RemediationPatchApplierTests : IDisposable
     [Fact]
     public void Apply_EmptySearchOnExistingFile_ReplacesTheWholeFile()
     {
-        var result = Apply(Edit(SecurityPath, string.Empty, "class Replaced {}\n"));
+        var result = Apply(Edit(SecurityPath, string.Empty, "public class SecurityConfiguration {}\n"));
 
         Assert.True(result.Applied, result.RejectionReason);
-        Assert.Equal("class Replaced {}\n", Read(SecurityPath));
+        Assert.Equal("public class SecurityConfiguration {}\n", Read(SecurityPath));
     }
 
     [Fact]

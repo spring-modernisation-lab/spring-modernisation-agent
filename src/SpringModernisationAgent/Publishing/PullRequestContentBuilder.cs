@@ -171,6 +171,7 @@ public static class PullRequestContentBuilder
                 ReviewFlagKind.SecurityChanged => "Security",
                 ReviewFlagKind.RequestMappingChanged => "Request mapping",
                 ReviewFlagKind.CallRemoved => "Removed code",
+                ReviewFlagKind.LargeAddition => "Large new code",
                 _ => "CI configuration"
             };
 

@@ -23,7 +23,10 @@ public enum ReviewFlagKind
     CallRemoved,
 
     /// <summary>A CI workflow file changed (any stage).</summary>
-    CiConfigurationChanged
+    CiConfigurationChanged,
+
+    /// <summary>The AI wrote a lot of new code in one file.</summary>
+    LargeAddition
 }
 
 /// <summary>Something a reviewer should look at, found deterministically.</summary>
@@ -41,6 +44,8 @@ public sealed record ReviewFlag(
 /// </summary>
 public static partial class ReviewFlagDetector
 {
+    public const int LargeAdditionLines = 40;
+
     private static readonly string[] SecurityTerms =
     [
         "SecurityFilterChain", "requestMatchers", "authorizeHttpRequests", "hasRole", "hasAnyRole",
@@ -71,6 +76,13 @@ public static partial class ReviewFlagDetector
                 if (!patch.AiWritten)
                 {
                     continue;
+                }
+
+                if (file.AddedLines.Count >= LargeAdditionLines)
+                {
+                    Add(flags, ReviewFlagKind.LargeAddition, patch.Stage, file.Path,
+                        $"The AI added {file.AddedLines.Count} lines here; check it is not re-implementing " +
+                        "a library or framework feature, and read it closely.");
                 }
 
                 var changed = file.AddedLines.Concat(file.RemovedLines).ToList();

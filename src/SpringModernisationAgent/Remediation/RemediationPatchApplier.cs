@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace SpringModernisationAgent.Remediation;
 
@@ -15,7 +16,7 @@ namespace SpringModernisationAgent.Remediation;
 /// <item>No path may pass through a link.</item>
 /// </list>
 /// </summary>
-public sealed class RemediationPatchApplier
+public sealed partial class RemediationPatchApplier
 {
     public const int MaxFiles = 10;
 
@@ -150,8 +151,129 @@ public sealed class RemediationPatchApplier
                 $"a proposal may change at most {MaxChangedLines} lines; this one changes about {changedLines}.");
         }
 
-        return (pending, appliedEdits, null);
+        var designError = CheckDesign(root, pending);
+
+        return designError is null
+            ? (pending, appliedEdits, null)
+            : (null, [], designError);
     }
+
+    /// <summary>
+    /// Two rules on the resulting code, not just on paths:
+    /// no new types (fixing code is the agent's job, designing new components
+    /// is not), and production code must not refer to test-only files (a
+    /// sign it special-cases the test to make it pass).
+    /// </summary>
+    private static string? CheckDesign(
+        string root,
+        IReadOnlyDictionary<string, PendingFile> pending)
+    {
+        HashSet<string>? testOnlyNames = null;
+
+        foreach (var (relativePath, file) in pending)
+        {
+            var extension = Path.GetExtension(relativePath);
+
+            if (extension is ".java" or ".kt")
+            {
+                var before = TypeNames(file.OriginalContent);
+                var added = TypeNames(file.Content).Except(before, StringComparer.Ordinal).ToList();
+
+                if (added.Count > 0)
+                {
+                    return $"'{relativePath}': adds new types ({string.Join(", ", added)}); writing a new " +
+                           "component is a design decision. Change the existing types, or choose NeedsHumanDecision.";
+                }
+            }
+
+            testOnlyNames ??= TestOnlyFileNames(root);
+
+            var references = testOnlyNames
+                .Where(name =>
+                    file.Content.Contains(name, StringComparison.Ordinal)
+                    && !file.OriginalContent.Contains(name, StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)
+                .ToList();
+
+            if (references.Count > 0)
+            {
+                return $"'{relativePath}': production code refers to test files ({string.Join(", ", references)}); " +
+                       "code under src/main must not special-case tests.";
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> TypeNames(
+        string code)
+    {
+        var stripped = StringLiteral().Replace(BlockComment().Replace(code, " "), "\"\"");
+        stripped = LineComment().Replace(stripped, string.Empty);
+
+        return TypeDeclaration().Matches(stripped)
+            .Select(match => match.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>File names (and test class names) that exist only under a src/test folder.</summary>
+    private static HashSet<string> TestOnlyFileNames(
+        string root)
+    {
+        var testNames = new HashSet<string>(StringComparer.Ordinal);
+        var mainNames = new HashSet<string>(StringComparer.Ordinal);
+
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            AttributesToSkip = FileAttributes.ReparsePoint,
+            IgnoreInaccessible = true
+        };
+
+        foreach (var file in Directory.EnumerateFiles(root, "*", options))
+        {
+            var segments = Path.GetRelativePath(root, file).Replace('\\', '/').Split('/');
+
+            if (segments.Any(ForbiddenSegments.Contains))
+            {
+                continue;
+            }
+
+            var target = ContainsPair(segments, "src", "test") ? testNames
+                : ContainsPair(segments, "src", "main") ? mainNames
+                : null;
+
+            if (target is null)
+            {
+                continue;
+            }
+
+            var name = Path.GetFileName(file);
+            target.Add(name);
+
+            if (Path.GetExtension(name) is ".java" or ".kt")
+            {
+                target.Add(Path.GetFileNameWithoutExtension(name));
+            }
+        }
+
+        // Very short names would match ordinary words.
+        testNames.RemoveWhere(name => name.Length < 6 || mainNames.Contains(name));
+        return testNames;
+    }
+
+    [GeneratedRegex(@"\b(?:class|interface|record|enum|object)\s+([A-Z][A-Za-z0-9_]*)")]
+    private static partial Regex TypeDeclaration();
+
+    [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
+    private static partial Regex BlockComment();
+
+    [GeneratedRegex(@"//[^\n]*")]
+    private static partial Regex LineComment();
+
+    [GeneratedRegex(@"""(?:\\.|[^""\\\n])*""")]
+    private static partial Regex StringLiteral();
 
     private static string? CheckPath(
         string? path)
@@ -257,8 +379,11 @@ public sealed class RemediationPatchApplier
         private readonly bool _existed;
         private readonly bool _hasBom;
         private string? _content;
+        private readonly string _originalContent;
 
         public string Content => _content ?? string.Empty;
+
+        public string OriginalContent => _originalContent;
 
         private PendingFile(string fullPath, bool existed, bool hasBom, string? content)
         {
@@ -266,6 +391,7 @@ public sealed class RemediationPatchApplier
             _existed = existed;
             _hasBom = hasBom;
             _content = content;
+            _originalContent = content ?? string.Empty;
         }
 
         public static PendingFile Load(

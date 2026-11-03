@@ -150,6 +150,26 @@ public class ReviewFlagDetectorTests
     }
 
     [Fact]
+    public void Detect_LargeAiAdditionsToAFile_AreFlagged()
+    {
+        var added = string.Join("\n", Enumerable.Range(0, ReviewFlagDetector.LargeAdditionLines)
+            .Select(index => $"+        store.put(key{index}, value);"));
+
+        var patch =
+            "diff --git a/src/main/java/a/CacheConfiguration.java b/src/main/java/a/CacheConfiguration.java\n" +
+            "--- a/src/main/java/a/CacheConfiguration.java\n" +
+            "+++ b/src/main/java/a/CacheConfiguration.java\n" +
+            "@@ -1,1 +1,40 @@\n" + added;
+
+        var flag = Assert.Single(
+            ReviewFlagDetector.Detect([new ReviewPatch("03-remediation-attempt-2", AiWritten: true, patch)]),
+            flag => flag.Kind == ReviewFlagKind.LargeAddition);
+
+        Assert.Contains($"{ReviewFlagDetector.LargeAdditionLines} lines", flag.Detail);
+        Assert.Contains("re-implementing", flag.Detail);
+    }
+
+    [Fact]
     public void UnifiedDiff_ParsesFilesAndChangedLines()
     {
         var files = UnifiedDiff.Parse(MappingPatch + "\n" + HttpClientPatch);

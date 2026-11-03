@@ -45,6 +45,8 @@ public class RemediationAgentTests
         Assert.Contains("never guess", model.Instructions);
         Assert.Contains("fix those first", model.Instructions);
         Assert.Contains("do not re-implement", model.Instructions);
+        Assert.Contains("Do not add new classes", model.Instructions);
+        Assert.Contains("must not refer to test files", model.Instructions);
         Assert.Contains("whole set of edits", model.Instructions);
     }
 
