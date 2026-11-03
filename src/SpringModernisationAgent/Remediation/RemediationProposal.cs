@@ -1,6 +1,9 @@
+using System.Text.Json.Serialization;
+
 namespace SpringModernisationAgent.Remediation;
 
 /// <summary>What the Remediation Agent decided about a validation failure.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<RemediationDecision>))]
 public enum RemediationDecision
 {
     /// <summary>The agent proposes edits that should fix the failure.</summary>
