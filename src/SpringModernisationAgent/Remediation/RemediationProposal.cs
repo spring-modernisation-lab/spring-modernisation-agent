@@ -48,3 +48,11 @@ public sealed record RemediationApplyResult(
     bool Applied,
     string? RejectionReason,
     IReadOnlyList<string> ChangedFiles);
+
+/// <param name="Accepted">True if every edit passed every guardrail.</param>
+/// <param name="RejectionReason">Why the edits would be rejected, if they would.</param>
+/// <param name="Files">Repository-relative path to resulting content, for accepted edits.</param>
+public sealed record RemediationPreviewResult(
+    bool Accepted,
+    string? RejectionReason,
+    IReadOnlyDictionary<string, string> Files);

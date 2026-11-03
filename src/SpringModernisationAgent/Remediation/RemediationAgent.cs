@@ -20,7 +20,13 @@ public sealed class RemediationAgent : IRemediationAgent
 
         How you work:
         - You can only read, through the tools. Read a file before you
-          propose an edit to it.
+          propose an edit to it. Files do not change while you work, so
+          read each file once and refer back to what you read.
+        - Before you answer, call preview_edits once with the
+          whole set of edits you intend to propose, and read the resulting
+          files in full. Fix anything that would not compile or that changes
+          behaviour, and preview the whole set again. Answer only with a set
+          of edits that preview_edits accepted as a whole.
         - Your answer is a proposal. The application checks it against fixed
           rules, applies it, and re-runs Maven; Maven decides if it worked.
 
@@ -28,16 +34,39 @@ public sealed class RemediationAgent : IRemediationAgent
         1. Only files under src/main/ with extension .java, .kt, .properties,
            .yml or .yaml may change. Tests, pom.xml, build scripts and CI
            files are read-only.
-        2. Each edit is an exact search and replace. Copy the search text
-           exactly as it appears in read_file output,
-           without the line-number prefix (for example "12: ").
-           It must occur exactly once in the file; include neighbouring lines
-           to make it unique. An empty search text creates a new file.
+        2. There are two kinds of edit:
+           - Whole file (preferred whenever you change more than a few lines
+             of a file): an empty search text, with the file's
+             complete new content as the replacement. Write the entire file,
+             every line, not only the parts that change.
+           - Search and replace (for a small, local change): copy the search
+             text exactly as it appears in read_file output,
+             without the line-number prefix (for example "12: ").
+             It must occur exactly once in the file; include neighbouring
+             lines to make it unique.
         3. Fix the root cause, not the symptom, and address every diagnostic
-           in one proposal where you can. Keep behaviour the same.
-        4. Keep the public API that the tests use. Never weaken security,
+           in one proposal where you can.
+        4. Keep behaviour the same. When you remove or replace code,
+           carry its behaviour over to the equivalent on the target platform: users and
+           roles, ignored or permitted paths, connection pool sizes, timeouts,
+           validation and error handling. Never delete such configuration or
+           rely on defaults instead. If you cannot carry it over, choose
+           NeedsHumanDecision rather than dropping it.
+        5. Keep the public API that the tests use. Never weaken security,
            remove validation, or delete code just to silence an error.
-        5. Use APIs that exist on the target platform: for Spring Boot 3 that
+        6. Each edited file must compile as a whole:
+           - add every import your new code needs, and remove imports of
+             types that no longer exist. To add imports, search for an
+             existing import line and replace it with that line followed by
+             the new ones;
+           - when a class implements an interface that changed, update every
+             method it implements to the new signatures, not just the ones
+             in the diagnostics;
+           - OpenRewrite marks code it could not migrate with comments like
+             /*~~(Migrate manually ...)~~>*/. When you migrate that code,
+             remove the marker together with anything it was attached to,
+             such as an annotation, so nothing is left orphaned.
+        7. Use APIs that exist on the target platform: for Spring Boot 3 that
            means Spring Framework 6, Spring Security 6 (SecurityFilterChain
            beans, no WebSecurityConfigurerAdapter), Hibernate 6 (the generic
            UserType<T> interface), Apache HttpClient 5 and the jakarta.*

@@ -18,6 +18,8 @@ public sealed class RemediationWorkspaceTools
 {
     public const int DefaultMaxCalls = 40;
 
+    public const int MaxPreviews = 5;
+
     public const int MaxReadLines = 400;
 
     public const int MaxSearchResults = 50;
@@ -92,7 +94,12 @@ public sealed class RemediationWorkspaceTools
         AIFunctionFactory.Create(
             GetDiagnostics,
             "get_diagnostics",
-            "The current validation diagnostics: failing tests and build errors.")
+            "The current validation diagnostics: failing tests and build errors."),
+        AIFunctionFactory.Create(
+            PreviewEdits,
+            "preview_edits",
+            "Check proposed edits against the same rules that will apply them, and show the " +
+            "resulting files with line numbers. Nothing is written. Use it before answering.")
     ];
 
     public string ReadFile(
@@ -218,6 +225,42 @@ public sealed class RemediationWorkspaceTools
         });
     }
 
+    public string PreviewEdits(
+        [Description("The edits exactly as they would appear in the proposal.")] IReadOnlyList<RemediationEdit> edits)
+    {
+        return Run("preview_edits", $"{edits?.Count ?? 0} edits", () =>
+        {
+            var preview = new RemediationPatchApplier().Preview(_root, edits ?? []);
+
+            if (!preview.Accepted)
+            {
+                return Fail($"rejected: {preview.RejectionReason}");
+            }
+
+            var output = new StringBuilder(
+                "Accepted. Nothing was written. The changed files would read:\n");
+
+            foreach (var (path, content) in preview.Files.OrderBy(file => file.Key, StringComparer.Ordinal))
+            {
+                output.Append("\n=== ").Append(path).AppendLine(" ===");
+
+                var lines = content.Replace("\r\n", "\n").Split('\n');
+
+                for (var index = 0; index < Math.Min(lines.Length, MaxReadLines); index++)
+                {
+                    output.Append(index + 1).Append(": ").AppendLine(Bound(lines[index]));
+                }
+
+                if (lines.Length > MaxReadLines)
+                {
+                    output.AppendLine($"... truncated at {MaxReadLines} lines.");
+                }
+            }
+
+            return Ok(BoundEvidence(output.ToString()));
+        });
+    }
+
     public string GetOpenRewritePatch() =>
         Run("get_openrewrite_patch", string.Empty, () => Ok(BoundEvidence(_openRewritePatch)));
 
@@ -229,14 +272,27 @@ public sealed class RemediationWorkspaceTools
         string arguments,
         Func<ToolResult> action)
     {
+        // Previews have their own allowance, so running out of exploration
+        // calls never stops the agent checking its edits before answering.
         lock (_gate)
         {
-            if (_calls.Count >= _maxCalls)
+            var isPreview = tool == "preview_edits";
+
+            var used = _calls.Count(call =>
+                (call.Tool == "preview_edits") == isPreview);
+
+            var refusal =
+                isPreview && used >= MaxPreviews
+                    ? $"Error: preview limit of {MaxPreviews} reached; return your proposal now."
+                : !isPreview && used >= _maxCalls
+                    ? $"Error: tool call budget of {_maxCalls} calls is used up; " +
+                      "check your edits with preview_edits, then return your proposal."
+                : null;
+
+            if (refusal is not null)
             {
                 _calls.Add(new RemediationToolCall(tool, arguments, Succeeded: false));
-
-                return $"Error: tool call budget of {_maxCalls} calls is used up; " +
-                       "return your proposal now.";
+                return refusal;
             }
         }
 

@@ -208,6 +208,41 @@ public class RemediationWorkspaceToolsTests : IDisposable
     }
 
     [Fact]
+    public void PreviewEdits_ShowsNumberedResultWithoutChangingTheWorkspace()
+    {
+        const string path = "src/main/java/com/example/MoneyUserType.java";
+        var before = File.ReadAllText(Path.Combine(Repository, path));
+        var tools = CreateTools();
+
+        var text = tools.PreviewEdits(
+        [
+            new RemediationEdit(path, "implements UserType {", "implements UserType<Money> {", "Hibernate 6")
+        ]);
+
+        Assert.StartsWith("Accepted", text);
+        Assert.Contains($"=== {path} ===", text);
+        Assert.Contains("3: public class MoneyUserType implements UserType<Money> {", text);
+        Assert.Equal(before, File.ReadAllText(Path.Combine(Repository, path)));
+        Assert.Equal("preview_edits", tools.Calls.Single().Tool);
+        Assert.True(tools.Calls.Single().Succeeded);
+    }
+
+    [Fact]
+    public void PreviewEdits_Rejected_ReturnsTheGuardrailReason()
+    {
+        var tools = CreateTools();
+
+        var text = tools.PreviewEdits(
+        [
+            new RemediationEdit("src/test/java/com/example/OrderTests.java", "class", "record", "x")
+        ]);
+
+        Assert.StartsWith("Error: rejected:", text);
+        Assert.Contains("test sources may not be edited", text);
+        Assert.False(tools.Calls.Single().Succeeded);
+    }
+
+    [Fact]
     public void EveryCall_IsRecorded()
     {
         var tools = CreateTools();
@@ -247,12 +282,43 @@ public class RemediationWorkspaceToolsTests : IDisposable
     }
 
     [Fact]
+    public void CallBudget_Exhausted_StillAllowsPreviewsAndSaysSo()
+    {
+        const string path = "src/main/java/com/example/MoneyUserType.java";
+        var tools = CreateTools(maxCalls: 1);
+
+        tools.ReadFile("pom.xml");
+
+        Assert.Contains("preview_edits", tools.ReadFile("pom.xml"));
+
+        var preview = tools.PreviewEdits(
+            [new RemediationEdit(path, "implements UserType {", "implements UserType<Money> {", "x")]);
+
+        Assert.StartsWith("Accepted", preview);
+    }
+
+    [Fact]
+    public void PreviewEdits_HaveTheirOwnLimit()
+    {
+        const string path = "src/main/java/com/example/MoneyUserType.java";
+        var tools = CreateTools();
+        var edit = new RemediationEdit(path, "implements UserType {", "implements UserType<Money> {", "x");
+
+        for (var index = 0; index < RemediationWorkspaceTools.MaxPreviews; index++)
+        {
+            Assert.StartsWith("Accepted", tools.PreviewEdits([edit]));
+        }
+
+        Assert.StartsWith("Error: preview limit", tools.PreviewEdits([edit]));
+    }
+
+    [Fact]
     public void AsAITools_ExposesExactlyTheReadOnlyTools()
     {
         var names = CreateTools().AsAITools().Select(tool => tool.Name).Order();
 
         Assert.Equal(
-            ["get_diagnostics", "get_openrewrite_patch", "list_files", "read_file", "search_source"],
+            ["get_diagnostics", "get_openrewrite_patch", "list_files", "preview_edits", "read_file", "search_source"],
             names);
     }
 

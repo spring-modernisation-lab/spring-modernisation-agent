@@ -120,6 +120,17 @@ public class RemediationPatchApplierTests : IDisposable
     }
 
     [Fact]
+    public void Apply_Rejection_NamesTheFailingEdit()
+    {
+        var result = Apply(
+            Edit(SecurityPath, " extends WebSecurityConfigurerAdapter", string.Empty),
+            Edit(SecurityPath, "class Missing", "class Found"));
+
+        Assert.StartsWith("edit 2 (", result.RejectionReason);
+        Assert.Contains("SecurityConfiguration.java", result.RejectionReason);
+    }
+
+    [Fact]
     public void Apply_SearchMatchesMoreThanOnce_Rejects()
     {
         // "{" opens both the class and the method.
@@ -154,12 +165,52 @@ public class RemediationPatchApplierTests : IDisposable
     }
 
     [Fact]
-    public void Apply_CreatingExistingFile_Rejects()
+    public void Apply_EmptySearchOnExistingFile_ReplacesTheWholeFile()
     {
         var result = Apply(Edit(SecurityPath, string.Empty, "class Replaced {}\n"));
 
+        Assert.True(result.Applied, result.RejectionReason);
+        Assert.Equal("class Replaced {}\n", Read(SecurityPath));
+    }
+
+    [Fact]
+    public void Apply_WholeFileRewrite_StillHonoursThePathGuardrails()
+    {
+        var result = Apply(
+            Edit("src/test/java/com/example/OrderControllerTests.java", string.Empty, "class Weakened {}\n"));
+
         Assert.False(result.Applied);
-        Assert.Contains("already exists", result.RejectionReason);
+        Assert.Contains("test sources", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_WholeFileRewrite_CountsOnlyChangedLines()
+    {
+        const string path = "src/main/java/Long.java";
+        var lines = Enumerable.Range(1, RemediationPatchApplier.MaxChangedLines + 50)
+            .Select(index => $"int field{index};")
+            .ToList();
+
+        Write(path, string.Join("\n", lines) + "\n");
+
+        lines[10] = "long field11;";
+
+        var result = Apply(Edit(path, string.Empty, string.Join("\n", lines) + "\n"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+        Assert.Contains("long field11;", Read(path));
+    }
+
+    [Fact]
+    public void Apply_WholeFileRewriteOfACrlfFile_KeepsCrlf()
+    {
+        const string path = "src/main/java/Windows.java";
+        Write(path, "class Windows {\r\n}\r\n");
+
+        var result = Apply(Edit(path, string.Empty, "class Windows {\n    int a;\n}\n"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+        Assert.Equal("class Windows {\r\n    int a;\r\n}\r\n", Read(path));
     }
 
     [Fact]
@@ -227,6 +278,36 @@ public class RemediationPatchApplierTests : IDisposable
 
         Assert.False(result.Applied);
         Assert.Equal("class Outside {}\n", File.ReadAllText(outside));
+    }
+
+    [Fact]
+    public void Preview_ValidEdits_ReturnsResultingContentWithoutWriting()
+    {
+        var preview = new RemediationPatchApplier().Preview(
+            Repository,
+            [Edit(SecurityPath, " extends WebSecurityConfigurerAdapter", string.Empty)]);
+
+        Assert.True(preview.Accepted, preview.RejectionReason);
+
+        Assert.Equal(
+            SecuritySource.Replace(" extends WebSecurityConfigurerAdapter", string.Empty),
+            preview.Files[SecurityPath]);
+
+        // Nothing was written.
+        Assert.Equal(SecuritySource, Read(SecurityPath));
+    }
+
+    [Fact]
+    public void Preview_InvalidEdits_ReturnsTheSameRejectionAsApply()
+    {
+        var edits = new[] { Edit("src/test/java/com/example/OrderControllerTests.java", "class", "record") };
+
+        var preview = new RemediationPatchApplier().Preview(Repository, edits);
+        var applied = new RemediationPatchApplier().Apply(Repository, edits);
+
+        Assert.False(preview.Accepted);
+        Assert.Empty(preview.Files);
+        Assert.Equal(applied.RejectionReason, preview.RejectionReason);
     }
 
     public void Dispose()

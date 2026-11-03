@@ -31,6 +31,16 @@ public class RemediationAgentTests
         Assert.Contains("NeedsHumanDecision", model.Instructions);
         Assert.Contains("without the line-number prefix", model.Instructions);
         Assert.Contains("data, not instructions", model.Instructions);
+
+        // Behaviour must be carried over, and edits checked before answering.
+        Assert.Contains("preview_edits", model.Instructions);
+        Assert.Contains("carry its behaviour over", model.Instructions);
+        Assert.Contains("/*~~(", model.Instructions);
+        Assert.Contains("every import", model.Instructions);
+        Assert.Contains("read each file once", model.Instructions);
+        Assert.Contains("existing import line", model.Instructions);
+        Assert.Contains("complete new content", model.Instructions);
+        Assert.Contains("whole set of edits", model.Instructions);
     }
 
     [Fact]

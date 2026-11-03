@@ -171,7 +171,11 @@ Exposed to the model as Agent Framework function tools. All paths are relative, 
 
 ### 4.6 Development and verification
 
-- [ ] **Local loop without Maven** (there is no JDK here): reconstruct the post-OpenRewrite workspace by applying the run 4 / Phase 3 patch to a clean `orders-service` clone. Run the agent against that workspace with real run 10 diagnostics, and review the proposals by eye before any CI run.
+- [x] **Local trial findings (3 Nov 2026, run 11 evidence, no Maven):**
+  - gpt-4.1 with many search/replace fragments produced incoherent refactors (deleted users, dropped pool sizes, orphaned annotations), even with stricter instructions and a preview tool.
+  - Fixes kept: `preview_edits` (same guardrails, in memory, own allowance of 5), rejection reasons name the edit, whole-file edits (empty search = complete new content), behaviour-preservation and compile-as-a-whole instructions.
+  - Deployment switched to **gpt-5-mini** (capacity 150; 12 was too low for tool use). Run 4: right structure in all three files, behaviour kept; about 3 small compile errors left for the CI loop (wrong `AuthenticationConfiguration` import, `sqlTypes()` → `getSqlType()`, HttpClient 5 TTL/eviction signatures). 112k/11k tokens, about 2 minutes.
+- [x] **Local loop without Maven** (there is no JDK here): reconstruct the post-OpenRewrite workspace by applying the run 4 / Phase 3 patch to a clean `orders-service` clone. Run the agent against that workspace with real run 10 diagnostics, and review the proposals by eye before any CI run.
 - [ ] CI run 1 (remediation enabled). Expected:
   1. Traps 1, 2 and 4 are fixed and `compile` passes.
   2. Trap 3 then surfaces in tests and is fixed.

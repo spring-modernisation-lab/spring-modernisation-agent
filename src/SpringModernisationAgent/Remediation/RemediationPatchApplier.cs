@@ -35,67 +35,11 @@ public sealed class RemediationPatchApplier
         string repositoryPath,
         IReadOnlyList<RemediationEdit> edits)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
-        ArgumentNullException.ThrowIfNull(edits);
+        var (pending, rejection) = Prepare(repositoryPath, edits);
 
-        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryPath));
-
-        if (edits.Count == 0)
+        if (pending is null)
         {
-            return Reject("the proposal contains no edits.");
-        }
-
-        // Path -> (original state, pending content), in first-seen order.
-        var pending = new Dictionary<string, PendingFile>(StringComparer.Ordinal);
-        var changedLines = 0;
-
-        foreach (var edit in edits)
-        {
-            var pathError = CheckPath(edit.Path);
-
-            if (pathError is not null)
-            {
-                return Reject($"'{edit.Path}': {pathError}");
-            }
-
-            var relativePath = Normalise(edit.Path);
-            var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
-
-            if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                return Reject($"'{edit.Path}': the path is outside the repository.");
-            }
-
-            if (PassesThroughLink(root, relativePath))
-            {
-                return Reject($"'{edit.Path}': links are not followed.");
-            }
-
-            if (!pending.TryGetValue(relativePath, out var file))
-            {
-                file = PendingFile.Load(fullPath);
-                pending[relativePath] = file;
-            }
-
-            var editError = file.ApplyEdit(edit);
-
-            if (editError is not null)
-            {
-                return Reject($"'{edit.Path}': {editError}");
-            }
-
-            changedLines += Math.Max(CountLines(edit.Search), CountLines(edit.Replace));
-        }
-
-        if (pending.Count > MaxFiles)
-        {
-            return Reject($"a proposal may change at most {MaxFiles} files; this one changes {pending.Count}.");
-        }
-
-        if (changedLines > MaxChangedLines)
-        {
-            return Reject(
-                $"a proposal may change at most {MaxChangedLines} lines; this one changes about {changedLines}.");
+            return Reject(rejection!);
         }
 
         foreach (var file in pending.Values)
@@ -107,6 +51,98 @@ public sealed class RemediationPatchApplier
             Applied: true,
             RejectionReason: null,
             ChangedFiles: pending.Keys.Order(StringComparer.Ordinal).ToList());
+    }
+
+    /// <summary>
+    /// Runs exactly the same checks as <see cref="Apply"/> and returns the
+    /// resulting file contents, without writing anything, so the agent can
+    /// inspect its edits before it answers.
+    /// </summary>
+    public RemediationPreviewResult Preview(
+        string repositoryPath,
+        IReadOnlyList<RemediationEdit> edits)
+    {
+        var (pending, rejection) = Prepare(repositoryPath, edits);
+
+        return pending is null
+            ? new RemediationPreviewResult(false, rejection, new Dictionary<string, string>())
+            : new RemediationPreviewResult(
+                true,
+                null,
+                pending.ToDictionary(entry => entry.Key, entry => entry.Value.Content));
+    }
+
+    /// <summary>Checks every edit and computes the new contents in memory.</summary>
+    private static (Dictionary<string, PendingFile>? Pending, string? Rejection) Prepare(
+        string repositoryPath,
+        IReadOnlyList<RemediationEdit> edits)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        ArgumentNullException.ThrowIfNull(edits);
+
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryPath));
+
+        if (edits.Count == 0)
+        {
+            return (null, "the proposal contains no edits.");
+        }
+
+        // Insertion order is first-seen order.
+        var pending = new Dictionary<string, PendingFile>(StringComparer.Ordinal);
+        var changedLines = 0;
+
+        for (var index = 0; index < edits.Count; index++)
+        {
+            var edit = edits[index];
+            var label = $"edit {index + 1} ('{edit.Path}')";
+            var pathError = CheckPath(edit.Path);
+
+            if (pathError is not null)
+            {
+                return (null, $"{label}: {pathError}");
+            }
+
+            var relativePath = Normalise(edit.Path);
+            var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
+
+            if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                return (null, $"{label}: the path is outside the repository.");
+            }
+
+            if (PassesThroughLink(root, relativePath))
+            {
+                return (null, $"{label}: links are not followed.");
+            }
+
+            if (!pending.TryGetValue(relativePath, out var file))
+            {
+                file = PendingFile.Load(fullPath);
+                pending[relativePath] = file;
+            }
+
+            var (editError, editChangedLines) = file.ApplyEdit(edit);
+
+            if (editError is not null)
+            {
+                return (null, $"{label}: {editError}");
+            }
+
+            changedLines += editChangedLines;
+        }
+
+        if (pending.Count > MaxFiles)
+        {
+            return (null, $"a proposal may change at most {MaxFiles} files; this one changes {pending.Count}.");
+        }
+
+        if (changedLines > MaxChangedLines)
+        {
+            return (null,
+                $"a proposal may change at most {MaxChangedLines} lines; this one changes about {changedLines}.");
+        }
+
+        return (pending, null);
     }
 
     private static string? CheckPath(
@@ -214,6 +250,8 @@ public sealed class RemediationPatchApplier
         private readonly bool _hasBom;
         private string? _content;
 
+        public string Content => _content ?? string.Empty;
+
         private PendingFile(string fullPath, bool existed, bool hasBom, string? content)
         {
             _fullPath = fullPath;
@@ -240,54 +278,84 @@ public sealed class RemediationPatchApplier
                 Encoding.UTF8.GetString(bytes, hasBom ? 3 : 0, bytes.Length - (hasBom ? 3 : 0)));
         }
 
-        public string? ApplyEdit(
+        /// <summary>
+        /// Applies one edit in memory. An empty search text means the
+        /// replacement is the file's complete new content (creating the file
+        /// if it does not exist). Returns the number of changed lines.
+        /// </summary>
+        public (string? Error, int ChangedLines) ApplyEdit(
             RemediationEdit edit)
         {
             var search = edit.Search ?? string.Empty;
             var replace = edit.Replace ?? string.Empty;
 
+            // Models write "\n"; match and write in the file's own style.
+            if (_content?.Contains("\r\n", StringComparison.Ordinal) == true)
+            {
+                search = ToCrlf(search);
+                replace = ToCrlf(replace);
+            }
+
             if (search.Length == 0)
             {
-                if (_existed || _content is not null)
-                {
-                    return "the file already exists; use a search text to edit it.";
-                }
-
                 if (replace.Length == 0)
                 {
-                    return "a new file needs content.";
+                    return ("a whole-file edit needs the file's complete new content.", 0);
                 }
 
+                var changed = CountChangedLines(_content ?? string.Empty, replace);
                 _content = replace;
-                return null;
+                return (null, changed);
             }
 
             if (_content is null)
             {
-                return "the file does not exist; use an empty search text to create it.";
-            }
-
-            // Models write "\n"; match and write in the file's own style.
-            if (_content.Contains("\r\n", StringComparison.Ordinal))
-            {
-                search = ToCrlf(search);
-                replace = ToCrlf(replace);
+                return ("the file does not exist; use an empty search text to create it.", 0);
             }
 
             var first = _content.IndexOf(search, StringComparison.Ordinal);
 
             if (first < 0)
             {
-                return "the search text was not found; read the file again and copy it exactly.";
+                return ("the search text was not found; read the file again and copy it exactly.", 0);
             }
 
             if (_content.IndexOf(search, first + 1, StringComparison.Ordinal) >= 0)
             {
-                return "the search text matches more than once; include more surrounding lines.";
+                return ("the search text matches more than once; include more surrounding lines.", 0);
             }
 
             _content = string.Concat(_content.AsSpan(0, first), replace, _content.AsSpan(first + search.Length));
-            return null;
+            return (null, Math.Max(CountLines(search), CountLines(replace)));
+        }
+
+        /// <summary>
+        /// Lines removed plus lines added, ignoring order: a cheap, slightly
+        /// generous measure of how much a whole-file rewrite changes.
+        /// </summary>
+        private static int CountChangedLines(
+            string before,
+            string after)
+        {
+            var remaining = before.Replace("\r\n", "\n").Split('\n')
+                .GroupBy(line => line, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+            var added = 0;
+
+            foreach (var line in after.Replace("\r\n", "\n").Split('\n'))
+            {
+                if (remaining.TryGetValue(line, out var count) && count > 0)
+                {
+                    remaining[line] = count - 1;
+                }
+                else
+                {
+                    added++;
+                }
+            }
+
+            return added + remaining.Values.Sum();
         }
 
         public void Write()
