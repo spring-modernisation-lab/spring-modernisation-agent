@@ -26,6 +26,26 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
   - Traps 3 and 5 are still latent; they'll only surface once the code compiles.
   - Artifact: `openrewrite-probe-orders-service-4`.
 
+## Remediation runs (CI, gpt-5-mini)
+
+- **Run 13** (`eaf7f30`, 3 attempts): `SecurityConfiguration` and `MoneyUserType` compiled after attempts 1 and 2; stuck on HttpClient 5 signatures (guessed `int, TimeUnit`, then `Duration`, then deleted the call). Outcome `AttemptsExhausted`. Led to the `describe_class` tool.
+- **Run 14** (`9d5fecc`, up to 5 attempts): **`orders-service` Fixed in 4 attempts; every check passed.** `describe_class` used for `UserType`, `HttpClientBuilder`, `PoolingHttpClientConnectionManager`, `AuthenticationConfiguration`. About 138k input / 13k output tokens in total.
+
+| # | Check | What the agent did |
+|---|---|---|
+| 1 | compile | Ported all three files (traps 1, 2, 4): `SecurityFilterChain`, in-memory users kept, `WebSecurityCustomizer` for `/h2-console`, `UserType<Money>` with `getSqlType()`, pooling via `PoolingHttpClientConnectionManager`. Left 2 import errors. |
+| 2 | compile | Fixed the `AuthenticationConfiguration` package and removed an unused `commons-lang3` import. Compile passed; context startup then failed (trap 3 surfaced). |
+| 3 | unit-tests | **Trap 3 fixed exactly:** `javax.servlet.*` string literals → `jakarta.servlet.*`. |
+| 4 | unit-tests | **Trap 5:** `@GetMapping({"", "/"})` keeps the legacy trailing-slash URL. Also changed `@PostMapping` the same way (not needed by any test). |
+
+### Review findings (green build, still not correct)
+
+1. **Likely privilege escalation (trap 5 side effect).** `POST /api/orders/` now reaches the controller, but the security rule is `requestMatchers(POST, "/api/orders").hasRole("OPERATOR")`, which in Spring 6 does not match the trailing slash; the request then only needs `authenticated()`, so a VIEWER can probably create orders. Not proven at runtime yet; no test POSTs with a slash. On Boot 2.7 both MVC and Security treated the slash as optional, so this is a regression the AI introduced.
+2. **Connection time-to-live silently dropped.** `setConnectionTimeToLive(30, SECONDS)` was removed instead of moved to `ConnectionConfig.setTimeToLive(...)` on the connection manager. Pool sizes and idle eviction were kept. Nothing fails, so Maven cannot catch it.
+3. **Trap 5 did not produce `NeedsHumanDecision`.** The agent found a behaviour-preserving fix, which is what its instructions ask for, so the demo currently has no "boundary holds" moment. The trap needs redesigning (for example a dependency with no Boot 3 / Jakarta release, which needs a `pom.xml` change the agent may not make).
+
+Demo talking point: *Maven decided the build is green; review found two behaviour changes the tests do not cover. That is why the output is a draft PR with a reviewer summary, not a merge.*
+
 ## Demo talking point (from run 4)
 
 > OpenRewrite did roughly 3 hours of mechanical work across 7 files in seconds, including the platform, Java version, `jakarta` namespace and security DSL. It then **explicitly flagged** what it couldn't do (*"Migrate manually"*), and left 12 compile errors in 3 files. That remainder is where the AI comes in.
