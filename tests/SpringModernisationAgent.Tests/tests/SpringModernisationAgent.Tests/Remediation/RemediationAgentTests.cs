@@ -43,6 +43,8 @@ public class RemediationAgentTests
         Assert.Contains("files of up to 400 lines", model.Instructions);
         Assert.Contains("describe_class", model.Instructions);
         Assert.Contains("never guess", model.Instructions);
+        Assert.Contains("fix those first", model.Instructions);
+        Assert.Contains("do not re-implement", model.Instructions);
         Assert.Contains("whole set of edits", model.Instructions);
     }
 
