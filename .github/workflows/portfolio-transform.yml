@@ -237,8 +237,10 @@ jobs:
         with:
           name: transformation-results-${{ github.run_number }}
           # The AI report files are optional; missing ones are skipped.
+          # Patches preserve the migrated code after workspace cleanup.
           path: |
             Artifacts/transformation-results.json
             Artifacts/migration-results-analysis.json
             Artifacts/spring-modernisation-migration-results.docx
+            Artifacts/patches/**
           if-no-files-found: warn

@@ -10,25 +10,29 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly OpenRewriteExecutionPlanBuilder _executionPlanBuilder;
     private readonly IOpenRewriteRunner _openRewriteRunner;
     private readonly TransformationValidator _transformationValidator;
+    private readonly IWorkspacePatchRecorder _patchRecorder;
 
     public OpenRewriteExecutionCoordinator(
     IRepositoryWorkspaceProvider workspaceProvider,
     IRepositoryWorkspaceCleaner workspaceCleaner,
     OpenRewriteExecutionPlanBuilder executionPlanBuilder,
     IOpenRewriteRunner openRewriteRunner,
-    TransformationValidator transformationValidator)
+    TransformationValidator transformationValidator,
+    IWorkspacePatchRecorder patchRecorder)
     {
         ArgumentNullException.ThrowIfNull(workspaceProvider);
         ArgumentNullException.ThrowIfNull(workspaceCleaner);
         ArgumentNullException.ThrowIfNull(executionPlanBuilder);
         ArgumentNullException.ThrowIfNull(openRewriteRunner);
         ArgumentNullException.ThrowIfNull(transformationValidator);
+        ArgumentNullException.ThrowIfNull(patchRecorder);
 
         _workspaceProvider = workspaceProvider;
         _workspaceCleaner = workspaceCleaner;
         _executionPlanBuilder = executionPlanBuilder;
         _openRewriteRunner = openRewriteRunner;
         _transformationValidator = transformationValidator;
+        _patchRecorder = patchRecorder;
     }
 
     public async Task<OpenRewriteExecutionPlan> CreateExecutionPlanAsync(
@@ -94,6 +98,13 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                         transformationPlan));
             }
 
+            // Record before validation so Maven build output can't leak
+            // into the patch.
+            var (patches, patchRecordingError) =
+                await RecordPatchesAsync(
+                    workspace,
+                    cancellationToken);
+
             var validationResult =
                 await _transformationValidator.ValidateAsync(
                     transformationPlan,
@@ -102,7 +113,11 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
             return new TransformationExecutionResult(
                 Transformation: transformationResult,
-                Validation: validationResult);
+                Validation: validationResult)
+            {
+                Patches = patches,
+                PatchRecordingError = patchRecordingError
+            };
         }
         finally
         {
@@ -112,6 +127,41 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                     workspace,
                     CancellationToken.None);
             }
+        }
+    }
+
+    /// <summary>
+    /// A recording failure must not discard the migration and validation
+    /// evidence, so it is reported on the result rather than thrown.
+    /// Cancellation still propagates.
+    /// </summary>
+    private async Task<(IReadOnlyList<PatchArtifact> Patches, string? Error)>
+        RecordPatchesAsync(
+            RepositoryWorkspace workspace,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            var openRewrite = await _patchRecorder.RecordAsync(
+                workspace.RepositoryPath,
+                workspace.RepositoryName,
+                workspace.CommitSha,
+                "01-openrewrite",
+                cancellationToken);
+
+            var cumulative = await _patchRecorder.RecordAsync(
+                workspace.RepositoryPath,
+                workspace.RepositoryName,
+                workspace.CommitSha,
+                "cumulative",
+                cancellationToken);
+
+            return ([openRewrite.Artifact, cumulative.Artifact], null);
+        }
+        catch (Exception exception)
+            when (exception is not OperationCanceledException)
+        {
+            return ([], exception.Message);
         }
     }
 

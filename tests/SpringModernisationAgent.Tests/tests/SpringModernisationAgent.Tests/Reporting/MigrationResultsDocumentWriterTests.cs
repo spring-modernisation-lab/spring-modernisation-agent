@@ -45,6 +45,12 @@ public class MigrationResultsDocumentWriterTests : IDisposable
         Assert.Contains("Replace the adapter with a SecurityFilterChain bean.", text);
         Assert.Contains("Custom Hibernate types need porting.", text);
 
+        // Preserved patches are listed with their hashes.
+        Assert.Contains(
+            "01-openrewrite: patches/customer-service/01-openrewrite.patch " +
+            "(2 files, SHA-256 0f1e2d)",
+            text);
+
         // Control boundaries are stated explicitly.
         Assert.Contains("AI Contribution and Control Boundaries", text);
     }
@@ -64,6 +70,28 @@ public class MigrationResultsDocumentWriterTests : IDisposable
         Assert.DoesNotContain("spring-modernisation-workspaces", text);
         Assert.DoesNotContain("[INFO] Scanning for projects", text);
         Assert.DoesNotContain("To see the full stack trace", text);
+    }
+
+    [Fact]
+    public async Task WriteAsync_PatchRecordingFailed_ReportsWhy()
+    {
+        var assessment = MigrationAnalysisInputBuilderTests.CreateProjectAssessment();
+        var repository = Assert.Single(assessment.Repositories);
+
+        var result = CreateFailedResult(repository.RepositoryName, repository.CommitSha) with
+        {
+            Patches = [],
+            PatchRecordingError = "Git could not snapshot the workspace."
+        };
+
+        var text = await WriteAndReadAsync(
+            assessment,
+            [result],
+            CreateAnalysis(repository.RepositoryName));
+
+        Assert.Contains(
+            "Patch recording failed: Git could not snapshot the workspace.",
+            text);
     }
 
     [Fact]
@@ -125,7 +153,7 @@ public class MigrationResultsDocumentWriterTests : IDisposable
         // Join paragraphs with newlines so assertions match whole lines.
         return string.Join(
             "\n",
-            document.MainDocumentPart!.Document.Body!
+            document.MainDocumentPart!.Document!.Body!
                 .Descendants<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
                 .Select(paragraph => paragraph.InnerText));
     }
@@ -170,7 +198,21 @@ public class MigrationResultsDocumentWriterTests : IDisposable
                         Passed: false,
                         StandardOutput: compileOutput,
                         StandardError: null)
-                ]));
+                ]))
+        {
+            Patches =
+            [
+                new PatchArtifact(
+                    Stage: "01-openrewrite",
+                    RelativePath: "patches/customer-service/01-openrewrite.patch",
+                    Sha256: "0f1e2d",
+                    ChangedFiles:
+                    [
+                        "pom.xml",
+                        "src/main/java/SecurityConfiguration.java"
+                    ])
+            ]
+        };
     }
 
     private static MigrationAnalysisResult CreateAnalysis(

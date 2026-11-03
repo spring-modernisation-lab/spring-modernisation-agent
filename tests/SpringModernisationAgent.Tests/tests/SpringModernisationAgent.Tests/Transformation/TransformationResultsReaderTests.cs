@@ -34,7 +34,18 @@ public class TransformationResultsReaderTests : IDisposable
                         Passed: false,
                         StandardOutput: "[ERROR] x",
                         StandardError: null)
-                ]));
+                ]))
+        {
+            Patches =
+            [
+                new PatchArtifact(
+                    Stage: "01-openrewrite",
+                    RelativePath: "patches/orders-service/01-openrewrite.patch",
+                    Sha256: "abc123",
+                    ChangedFiles: ["pom.xml"])
+            ],
+            PatchRecordingError = null
+        };
 
         await new TransformationResultsWriter().WriteAsync([original], path);
 
@@ -49,6 +60,53 @@ public class TransformationResultsReaderTests : IDisposable
 
         var check = Assert.Single(result.Validation.Checks);
         Assert.Equal("[ERROR] x", check.StandardOutput);
+
+        var patch = Assert.Single(result.Patches);
+        Assert.Equal("01-openrewrite", patch.Stage);
+        Assert.Equal("patches/orders-service/01-openrewrite.patch", patch.RelativePath);
+        Assert.Equal("abc123", patch.Sha256);
+        Assert.Equal(["pom.xml"], patch.ChangedFiles);
+        Assert.Null(result.PatchRecordingError);
+    }
+
+    [Fact]
+    public async Task ReadAsync_ResultsWrittenBeforePatchesExisted_ReadWithNoPatches()
+    {
+        Directory.CreateDirectory(_directory);
+
+        var path = Path.Combine(_directory, "transformation-results.json");
+
+        await File.WriteAllTextAsync(
+            path,
+            """
+            [
+              {
+                "Transformation": {
+                  "RepositoryName": "platform-parent",
+                  "SourceCommitSha": "abc",
+                  "Status": "Succeeded",
+                  "AppliedRecipes": [],
+                  "ChangedFiles": ["pom.xml"],
+                  "StandardOutput": null,
+                  "StandardError": null
+                },
+                "Validation": {
+                  "RepositoryName": "platform-parent",
+                  "SourceCommitSha": "abc",
+                  "Status": "Passed",
+                  "Checks": []
+                },
+                "Succeeded": true
+              }
+            ]
+            """);
+
+        var result = Assert.Single(
+            await new TransformationResultsReader().ReadAsync(path));
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(result.Patches);
+        Assert.Null(result.PatchRecordingError);
     }
 
     [Fact]

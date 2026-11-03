@@ -106,6 +106,7 @@ public sealed class TransformCommand
             CreateWaveExecutor(
                 workspaceRoot,
                 mavenPluginVersion,
+                artifactsDirectory,
                 wavePlanner,
                 repositorySelector);
 
@@ -176,6 +177,19 @@ public sealed class TransformCommand
                     Console.WriteLine(
                         $"    - {changedFile}");
                 }
+            }
+
+            foreach (var patch in result.Patches)
+            {
+                Console.WriteLine(
+                    $"  Patch: {patch.RelativePath} " +
+                    $"({patch.ChangedFiles.Count} files, sha256 {patch.Sha256})");
+            }
+
+            if (result.PatchRecordingError is not null)
+            {
+                Console.WriteLine(
+                    $"  Patch recording failed: {result.PatchRecordingError}");
             }
 
             if (result.Validation.Checks.Count > 0)
@@ -290,6 +304,7 @@ public sealed class TransformCommand
     private static MigrationWaveExecutor CreateWaveExecutor(
         string workspaceRoot,
         string mavenPluginVersion,
+        string artifactsDirectory,
         MigrationWaveExecutionPlanner wavePlanner,
         MigrationWaveRepositorySelector repositorySelector)
     {
@@ -331,7 +346,10 @@ public sealed class TransformCommand
                 workspaceCleaner,
                 new OpenRewriteExecutionPlanBuilder(),
                 openRewriteRunner,
-                transformationValidator);
+                transformationValidator,
+                new GitWorkspacePatchRecorder(
+                    gitProcessRunner,
+                    artifactsDirectory));
 
         return new MigrationWaveExecutor(
             wavePlanner,

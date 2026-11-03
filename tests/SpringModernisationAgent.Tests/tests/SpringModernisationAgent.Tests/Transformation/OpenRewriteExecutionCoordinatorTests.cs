@@ -464,11 +464,171 @@ public class OpenRewriteExecutionCoordinatorTests
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_TransformationSucceeds_RecordsPatchesBeforeValidation()
+    {
+        var mavenRunner = new FakeMavenProcessRunner(
+        [
+            SuccessfulMavenResult(),
+            SuccessfulMavenResult(),
+            SuccessfulMavenResult()
+        ]);
+
+        var recorder = new FakePatchRecorder(mavenRunner);
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var coordinator = CreateCoordinator(
+                CreateWorkspaceProvider(workspacePath),
+                new FakeRepositoryWorkspaceCleaner(),
+                mavenProcessRunner: mavenRunner,
+                patchRecorder: recorder);
+
+            var result = await coordinator.ExecuteAsync(
+                "spring-modernisation-lab",
+                CreateTransformationPlan());
+
+            Assert.True(result.Succeeded);
+            Assert.Null(result.PatchRecordingError);
+
+            Assert.Equal(
+                ["01-openrewrite", "cumulative"],
+                result.Patches.Select(patch => patch.Stage));
+
+            Assert.All(recorder.Calls, call =>
+            {
+                Assert.Equal(workspacePath, call.RepositoryPath);
+                Assert.Equal("customer-service", call.RepositoryName);
+                Assert.Equal(CommitSha, call.BaseRevision);
+
+                // Snapshots precede Maven, so build output can't leak in.
+                Assert.Equal(0, call.MavenCallsSoFar);
+            });
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidationFails_StillRecordsPatches()
+    {
+        var mavenRunner = new FakeMavenProcessRunner(
+        [
+            new MavenProcessResult(
+                ExitCode: 1,
+                StandardOutput: "[ERROR] cannot find symbol",
+                StandardError: string.Empty),
+            SuccessfulMavenResult(),
+            SuccessfulMavenResult()
+        ]);
+
+        var coordinator = CreateCoordinator(
+            CreateWorkspaceProvider(),
+            new FakeRepositoryWorkspaceCleaner(),
+            mavenProcessRunner: mavenRunner,
+            patchRecorder: new FakePatchRecorder());
+
+        var result = await coordinator.ExecuteAsync(
+            "spring-modernisation-lab",
+            CreateTransformationPlan());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(2, result.Patches.Count);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RunnerReturnsFailedResult_RecordsNoPatches()
+    {
+        var recorder = new FakePatchRecorder();
+
+        var runner = new FakeOpenRewriteRunner
+        {
+            Result = new TransformationResult(
+                RepositoryName: "customer-service",
+                SourceCommitSha: CommitSha,
+                Status: TransformationStatus.Failed,
+                AppliedRecipes: [],
+                ChangedFiles: [],
+                StandardOutput: null,
+                StandardError: "Transformation failed.")
+        };
+
+        var coordinator = CreateCoordinator(
+            CreateWorkspaceProvider(),
+            new FakeRepositoryWorkspaceCleaner(),
+            runner,
+            patchRecorder: recorder);
+
+        var result = await coordinator.ExecuteAsync(
+            "spring-modernisation-lab",
+            CreateTransformationPlan());
+
+        Assert.Empty(result.Patches);
+        Assert.Empty(recorder.Calls);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RecorderThrows_RecordsErrorAndStillValidatesAndCleans()
+    {
+        var cleaner = new FakeRepositoryWorkspaceCleaner();
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var coordinator = CreateCoordinator(
+                CreateWorkspaceProvider(workspacePath),
+                cleaner,
+                patchRecorder: new FakePatchRecorder
+                {
+                    Exception = new InvalidOperationException("Git could not snapshot.")
+                });
+
+            var result = await coordinator.ExecuteAsync(
+                "spring-modernisation-lab",
+                CreateTransformationPlan());
+
+            Assert.True(result.Succeeded);
+            Assert.Empty(result.Patches);
+            Assert.Equal("Git could not snapshot.", result.PatchRecordingError);
+            Assert.Equal(3, result.Validation.Checks.Count);
+            Assert.True(cleaner.Called);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RecorderCancelled_PropagatesAndCleans()
+    {
+        var cleaner = new FakeRepositoryWorkspaceCleaner();
+
+        var coordinator = CreateCoordinator(
+            CreateWorkspaceProvider(),
+            cleaner,
+            patchRecorder: new FakePatchRecorder
+            {
+                Exception = new OperationCanceledException()
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => coordinator.ExecuteAsync(
+                "spring-modernisation-lab",
+                CreateTransformationPlan()));
+
+        Assert.True(cleaner.Called);
+    }
+
     private static OpenRewriteExecutionCoordinator CreateCoordinator(
         IRepositoryWorkspaceProvider workspaceProvider,
         IRepositoryWorkspaceCleaner workspaceCleaner,
         IOpenRewriteRunner? openRewriteRunner = null,
-        IMavenProcessRunner? mavenProcessRunner = null)
+        IMavenProcessRunner? mavenProcessRunner = null,
+        IWorkspacePatchRecorder? patchRecorder = null)
     {
         var executionPlanBuilder =
             new OpenRewriteExecutionPlanBuilder();
@@ -488,7 +648,8 @@ public class OpenRewriteExecutionCoordinatorTests
             workspaceCleaner,
             executionPlanBuilder,
             openRewriteRunner ?? new FakeOpenRewriteRunner(),
-            transformationValidator);
+            transformationValidator,
+            patchRecorder ?? new FakePatchRecorder());
     }
 
     private static string CreateTemporaryDirectory()
@@ -512,13 +673,14 @@ public class OpenRewriteExecutionCoordinatorTests
         }
     }
 
-    private static FakeWorkspaceProvider CreateWorkspaceProvider()
+    private static FakeWorkspaceProvider CreateWorkspaceProvider(
+        string repositoryPath = "/workspace/customer-service")
     {
         return new FakeWorkspaceProvider
         {
             Workspace = new RepositoryWorkspace(
                 RepositoryName: "customer-service",
-                RepositoryPath: "/workspace/customer-service",
+                RepositoryPath: repositoryPath,
                 CommitSha: CommitSha)
         };
     }
@@ -698,6 +860,50 @@ public class OpenRewriteExecutionCoordinatorTests
             return Task.FromResult(result);
         }
     }
+
+    private sealed class FakePatchRecorder(
+        FakeMavenProcessRunner? mavenRunner = null)
+        : IWorkspacePatchRecorder
+    {
+        public List<PatchRecorderCall> Calls { get; } = [];
+
+        public Exception? Exception { get; init; }
+
+        public Task<RecordedPatch> RecordAsync(
+            string repositoryPath,
+            string repositoryName,
+            string baseRevision,
+            string stage,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add(new PatchRecorderCall(
+                repositoryPath,
+                repositoryName,
+                baseRevision,
+                stage,
+                mavenRunner?.Calls.Count ?? 0));
+
+            if (Exception is not null)
+            {
+                throw Exception;
+            }
+
+            return Task.FromResult(new RecordedPatch(
+                TreeId: "tree",
+                Artifact: new PatchArtifact(
+                    Stage: stage,
+                    RelativePath: $"patches/{repositoryName}/{stage}.patch",
+                    Sha256: "hash",
+                    ChangedFiles: ["pom.xml"])));
+        }
+    }
+
+    private sealed record PatchRecorderCall(
+        string RepositoryPath,
+        string RepositoryName,
+        string BaseRevision,
+        string Stage,
+        int MavenCallsSoFar);
 
     private sealed record MavenProcessCall(
         string WorkingDirectory,

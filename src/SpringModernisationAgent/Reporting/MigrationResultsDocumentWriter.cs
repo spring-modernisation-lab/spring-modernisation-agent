@@ -298,6 +298,27 @@ public sealed class MigrationResultsDocumentWriter
             AddBullet(body, file);
         }
 
+        AddHeading(body, "Preserved patches", 3);
+
+        if (result.PatchRecordingError is not null)
+        {
+            AddParagraph(
+                body,
+                $"Patch recording failed: {result.PatchRecordingError}");
+        }
+        else if (result.Patches.Count == 0)
+        {
+            AddParagraph(body, "No patches were recorded.");
+        }
+
+        foreach (var patch in result.Patches)
+        {
+            AddBullet(
+                body,
+                $"{patch.Stage}: {patch.RelativePath} " +
+                $"({patch.ChangedFiles.Count} files, SHA-256 {patch.Sha256})");
+        }
+
         AddHeading(body, "Validation checks", 3);
 
         if (result.Validation.Checks.Count == 0)
