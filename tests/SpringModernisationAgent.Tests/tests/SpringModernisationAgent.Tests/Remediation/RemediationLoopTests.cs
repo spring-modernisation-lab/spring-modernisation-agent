@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Remediation;
+using SpringModernisationAgent.Tests.Transformation;
 using SpringModernisationAgent.Transformation;
 using SpringModernisationAgent.Workspace;
 
@@ -67,6 +68,25 @@ public class RemediationLoopTests : IDisposable
         Assert.Contains(CompileError, request.Diagnostics);
         Assert.Empty(request.PreviousAttempts);
         Assert.Equal("get_openrewrite_patch", agent.ToolNames.Single());
+    }
+
+    [Fact]
+    public async Task RunAsync_ReportsProgressForEachStageOfAnAttempt()
+    {
+        var agent = new FakeAgent(
+            Fix("class Missing", "class Found"),
+            Fix(" extends WebSecurityConfigurerAdapter", ""));
+
+        var progress = new MigrationProgressTests.RecordingProgress();
+
+        await CreateLoop(agent, new FakeMaven(Passed(), Passed(), Passed()), progress: progress).RunAsync(
+            CreatePlan(), CreateWorkspace(), "tree-openrewrite", OpenRewritePatchPath, FailedCompile());
+
+        Assert.Contains("orders-service: remediation attempt 1/3: asking the agent (compile, 1 diagnostic lines)", progress.Messages);
+        Assert.Contains(progress.Messages, message => message.StartsWith("orders-service: attempt 1: Fix; 0 tool calls (0 previews); tokens 1000/200"));
+        Assert.Contains(progress.Messages, message => message.StartsWith("orders-service: attempt 1: guardrails rejected: edit 1"));
+        Assert.Contains("orders-service: attempt 2: guardrails accepted 1 edit (1 search and replace); re-validating", progress.Messages);
+        Assert.Equal("orders-service: remediation finished: Fixed after 2 attempts", progress.Messages[^1]);
     }
 
     [Fact]
@@ -245,13 +265,15 @@ public class RemediationLoopTests : IDisposable
         FakeAgent agent,
         FakeMaven maven,
         FakeRecorder? recorder = null,
-        int maxAttempts = 3) =>
+        int maxAttempts = 3,
+        IMigrationProgress? progress = null) =>
         new(
             agent,
             new RemediationPatchApplier(),
             recorder ?? new FakeRecorder(),
             new TransformationValidator(maven),
-            maxAttempts);
+            maxAttempts,
+            progress);
 
     private RepositoryWorkspace CreateWorkspace() =>
         new("orders-service", Repository, CommitSha);

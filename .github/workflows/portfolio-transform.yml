@@ -254,6 +254,7 @@ jobs:
           # Patches preserve the migrated code after workspace cleanup.
           path: |
             Artifacts/transformation-results.json
+            Artifacts/transformation-summary.md
             Artifacts/migration-results-analysis.json
             Artifacts/spring-modernisation-migration-results.docx
             Artifacts/patches/**

@@ -22,13 +22,15 @@ public sealed class RemediationLoop : IRemediationLoop
     private readonly IWorkspacePatchRecorder _patchRecorder;
     private readonly TransformationValidator _validator;
     private readonly int _maxAttempts;
+    private readonly IMigrationProgress _progress;
 
     public RemediationLoop(
         IRemediationAgent agent,
         RemediationPatchApplier applier,
         IWorkspacePatchRecorder patchRecorder,
         TransformationValidator validator,
-        int maxAttempts = DefaultMaxAttempts)
+        int maxAttempts = DefaultMaxAttempts,
+        IMigrationProgress? progress = null)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(applier);
@@ -41,6 +43,7 @@ public sealed class RemediationLoop : IRemediationLoop
         _patchRecorder = patchRecorder;
         _validator = validator;
         _maxAttempts = maxAttempts;
+        _progress = progress ?? NullMigrationProgress.Instance;
     }
 
     public async Task<RemediationLoopResult> RunAsync(
@@ -50,6 +53,31 @@ public sealed class RemediationLoop : IRemediationLoop
         string openRewritePatchPath,
         TransformationValidationResult validation,
         CancellationToken cancellationToken = default)
+    {
+        var result = await RunAttemptsAsync(
+            plan,
+            workspace,
+            openRewriteTreeId,
+            openRewritePatchPath,
+            validation,
+            cancellationToken);
+
+        var attempts = result.Report.Attempts.Count;
+
+        _progress.Report(
+            plan.RepositoryName,
+            $"remediation finished: {result.Report.Outcome} after {attempts} attempt{(attempts == 1 ? "" : "s")}");
+
+        return result;
+    }
+
+    private async Task<RemediationLoopResult> RunAttemptsAsync(
+        TransformationPlan plan,
+        RepositoryWorkspace workspace,
+        string openRewriteTreeId,
+        string openRewritePatchPath,
+        TransformationValidationResult validation,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(workspace);
@@ -105,6 +133,13 @@ public sealed class RemediationLoop : IRemediationLoop
                 InputTokens: null,
                 OutputTokens: null);
 
+            var repository = plan.RepositoryName;
+
+            _progress.Report(
+                repository,
+                $"remediation attempt {number}/{_maxAttempts}: asking the agent " +
+                $"({failedCheck.Check}, {diagnostics.Count} diagnostic lines)");
+
             RemediationAgentResult proposed;
 
             try
@@ -113,6 +148,7 @@ public sealed class RemediationLoop : IRemediationLoop
             }
             catch (InvalidRemediationProposalException exception)
             {
+                _progress.Report(repository, $"attempt {number}: invalid proposal: {exception.Message}");
                 run.Add(attempt with { Error = exception.Message, ToolCalls = tools.Calls });
                 run.Feedback.Add(new RemediationAttemptSummary(number, "Invalid proposal", exception.Message));
                 continue;
@@ -120,9 +156,18 @@ public sealed class RemediationLoop : IRemediationLoop
             catch (Exception exception)
                 when (exception is not OperationCanceledException)
             {
+                _progress.Report(repository, $"attempt {number}: error: {exception.Message}");
                 run.Add(attempt with { Error = exception.Message, ToolCalls = tools.Calls });
                 return run.Finish(RemediationOutcome.Error);
             }
+
+            var calls = tools.Calls;
+
+            _progress.Report(
+                repository,
+                $"attempt {number}: {proposed.Proposal.Decision}; {calls.Count} tool calls " +
+                $"({calls.Count(call => call.Tool == "preview_edits")} previews); " +
+                $"tokens {proposed.InputTokens?.ToString() ?? "?"}/{proposed.OutputTokens?.ToString() ?? "?"}");
 
             attempt = attempt with
             {
@@ -147,6 +192,7 @@ public sealed class RemediationLoop : IRemediationLoop
 
             if (!applied.Applied)
             {
+                _progress.Report(repository, $"attempt {number}: guardrails rejected: {applied.RejectionReason}");
                 run.Add(attempt with { RejectionReason = applied.RejectionReason });
                 run.Feedback.Add(new RemediationAttemptSummary(
                     number,
@@ -154,6 +200,10 @@ public sealed class RemediationLoop : IRemediationLoop
                     applied.RejectionReason ?? string.Empty));
                 continue;
             }
+
+            _progress.Report(
+                repository,
+                $"attempt {number}: guardrails accepted {DescribeEdits(applied.AppliedEdits)}; re-validating");
 
             RecordedPatch patch;
 
@@ -221,6 +271,28 @@ public sealed class RemediationLoop : IRemediationLoop
         }
 
         return run.Finish(RemediationOutcome.AttemptsExhausted);
+    }
+
+    // "3 edits (2 whole-file rewrites, 1 search and replace)"
+    private static string DescribeEdits(
+        IReadOnlyList<AppliedEdit> edits)
+    {
+        var kinds = edits
+            .GroupBy(edit => edit.Kind)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var count = group.Count();
+
+                return group.Key switch
+                {
+                    RemediationEditKind.WholeFileRewrite => $"{count} whole-file rewrite{(count == 1 ? "" : "s")}",
+                    RemediationEditKind.NewFile => $"{count} new file{(count == 1 ? "" : "s")}",
+                    _ => $"{count} search and replace"
+                };
+            });
+
+        return $"{edits.Count} edit{(edits.Count == 1 ? "" : "s")} ({string.Join(", ", kinds)})";
     }
 
     /// <summary>The mutable state of one remediation run.</summary>

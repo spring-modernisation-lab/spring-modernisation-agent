@@ -13,6 +13,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly TransformationValidator _transformationValidator;
     private readonly IWorkspacePatchRecorder _patchRecorder;
     private readonly IRemediationLoop? _remediationLoop;
+    private readonly IMigrationProgress _progress;
 
     public OpenRewriteExecutionCoordinator(
     IRepositoryWorkspaceProvider workspaceProvider,
@@ -21,7 +22,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     IOpenRewriteRunner openRewriteRunner,
     TransformationValidator transformationValidator,
     IWorkspacePatchRecorder patchRecorder,
-    IRemediationLoop? remediationLoop = null)
+    IRemediationLoop? remediationLoop = null,
+    IMigrationProgress? progress = null)
     {
         ArgumentNullException.ThrowIfNull(workspaceProvider);
         ArgumentNullException.ThrowIfNull(workspaceCleaner);
@@ -39,6 +41,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
         // Null means remediation is not enabled for this run.
         _remediationLoop = remediationLoop;
+        _progress = progress ?? NullMigrationProgress.Instance;
     }
 
     public async Task<OpenRewriteExecutionPlan> CreateExecutionPlanAsync(
@@ -73,9 +76,15 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
         ArgumentNullException.ThrowIfNull(transformationPlan);
 
         RepositoryWorkspace? workspace = null;
+        var repository = transformationPlan.RepositoryName;
+        var started = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
+            _progress.Report(
+                repository,
+                $"cloning at {transformationPlan.SourceCommitSha[..Math.Min(7, transformationPlan.SourceCommitSha.Length)]}");
+
             workspace = await _workspaceProvider.CreateAsync(
                 organisation,
                 transformationPlan.RepositoryName,
@@ -90,10 +99,22 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 transformationPlan,
                 workspace.RepositoryPath);
 
+            _progress.Report(
+                repository,
+                $"running OpenRewrite ({executionPlan.Recipes.Count} recipes)");
+
+            var openRewriteStarted = System.Diagnostics.Stopwatch.StartNew();
+
             var transformationResult =
                 await _openRewriteRunner.RunAsync(
                     executionPlan,
                     cancellationToken);
+
+            _progress.Report(
+                repository,
+                $"OpenRewrite {transformationResult.Status}: " +
+                $"{transformationResult.ChangedFiles.Count} files changed " +
+                $"({openRewriteStarted.Elapsed.TotalSeconds:F0}s)");
 
             if (transformationResult.Status !=
                 TransformationStatus.Succeeded)
@@ -134,6 +155,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 else if (openRewrite is null)
                 {
                     // Edits that could not be attributed are never made.
+                    _progress.Report(repository, "remediation skipped: the OpenRewrite patch could not be recorded");
                     remediation = new RemediationReport(RemediationOutcome.Error, []);
                 }
                 else
@@ -170,7 +192,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 patchRecordingError ??= cumulativeError;
             }
 
-            return new TransformationExecutionResult(
+            var result = new TransformationExecutionResult(
                 Transformation: transformationResult,
                 Validation: validationResult)
             {
@@ -178,6 +200,13 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 PatchRecordingError = patchRecordingError,
                 Remediation = remediation
             };
+
+            _progress.Report(
+                repository,
+                $"finished: {(result.Succeeded ? "Succeeded" : "Failed")} " +
+                $"({started.Elapsed.TotalSeconds:F0}s)");
+
+            return result;
         }
         finally
         {

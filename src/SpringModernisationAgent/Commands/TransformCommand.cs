@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Remediation;
+using SpringModernisationAgent.Reporting;
 using SpringModernisationAgent.Transformation;
 using SpringModernisationAgent.Workspace;
 
@@ -137,6 +138,11 @@ public sealed class TransformCommand
         await resultsWriter.WriteAsync(
             allResults,
             transformationResultsPath,
+            cancellationToken);
+
+        await WriteSummaryAsync(
+            newResults,
+            artifactsDirectory,
             cancellationToken);
 
         Console.WriteLine();
@@ -342,9 +348,14 @@ public sealed class TransformCommand
                 changeDetector,
                 mavenPluginVersion);
 
+        // Live, timestamped progress so a CI log shows each stage as it runs.
+        var progress =
+            new ConsoleMigrationProgress();
+
         var transformationValidator =
             new TransformationValidator(
-                mavenProcessRunner);
+                mavenProcessRunner,
+                progress);
 
         var patchRecorder =
             new GitWorkspacePatchRecorder(
@@ -354,7 +365,8 @@ public sealed class TransformCommand
         var remediationLoop =
             CreateRemediationLoop(
                 patchRecorder,
-                transformationValidator);
+                transformationValidator,
+                progress);
 
         IOpenRewriteExecutionCoordinator executionCoordinator =
             new OpenRewriteExecutionCoordinator(
@@ -364,7 +376,8 @@ public sealed class TransformCommand
                 openRewriteRunner,
                 transformationValidator,
                 patchRecorder,
-                remediationLoop);
+                remediationLoop,
+                progress);
 
         return new MigrationWaveExecutor(
             wavePlanner,
@@ -378,7 +391,8 @@ public sealed class TransformCommand
     /// </summary>
     private static IRemediationLoop? CreateRemediationLoop(
         IWorkspacePatchRecorder patchRecorder,
-        TransformationValidator transformationValidator)
+        TransformationValidator transformationValidator,
+        IMigrationProgress progress)
     {
         var setting =
             Environment.GetEnvironmentVariable(
@@ -400,7 +414,9 @@ public sealed class TransformCommand
             RemediationAgentFactory.Create(),
             new RemediationPatchApplier(),
             patchRecorder,
-            transformationValidator);
+            transformationValidator,
+            RemediationLoop.DefaultMaxAttempts,
+            progress);
     }
 
     private static void WriteRemediation(
@@ -453,6 +469,35 @@ public sealed class TransformCommand
                 $"      Tool calls: {attempt.ToolCalls.Count}; " +
                 $"tokens in/out: {attempt.InputTokens?.ToString() ?? "?"}/" +
                 $"{attempt.OutputTokens?.ToString() ?? "?"}");
+        }
+    }
+
+    /// <summary>
+    /// Writes a Markdown summary of this wave to the artifacts and, in
+    /// GitHub Actions, to the job summary page (GITHUB_STEP_SUMMARY).
+    /// </summary>
+    private static async Task WriteSummaryAsync(
+        IReadOnlyList<TransformationExecutionResult> results,
+        string artifactsDirectory,
+        CancellationToken cancellationToken)
+    {
+        var markdown = TransformationSummaryWriter.Render(results);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(artifactsDirectory, "transformation-summary.md"),
+            markdown,
+            cancellationToken);
+
+        var jobSummary =
+            Environment.GetEnvironmentVariable(
+                "GITHUB_STEP_SUMMARY");
+
+        if (!string.IsNullOrWhiteSpace(jobSummary))
+        {
+            await File.AppendAllTextAsync(
+                jobSummary,
+                markdown,
+                cancellationToken);
         }
     }
 

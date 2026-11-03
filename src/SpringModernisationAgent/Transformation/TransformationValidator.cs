@@ -6,13 +6,16 @@ namespace SpringModernisationAgent.Transformation;
 public sealed class TransformationValidator
 {
     private readonly IMavenProcessRunner _mavenProcessRunner;
+    private readonly IMigrationProgress _progress;
 
     public TransformationValidator(
-        IMavenProcessRunner mavenProcessRunner)
+        IMavenProcessRunner mavenProcessRunner,
+        IMigrationProgress? progress = null)
     {
         ArgumentNullException.ThrowIfNull(mavenProcessRunner);
 
         _mavenProcessRunner = mavenProcessRunner;
+        _progress = progress ?? NullMigrationProgress.Instance;
     }
 
     public async Task<TransformationValidationResult> ValidateAsync(
@@ -53,6 +56,12 @@ public sealed class TransformationValidator
             // Allow for coarse file timestamp resolution.
             var checkStartedUtc = DateTime.UtcNow.AddSeconds(-2);
 
+            _progress.Report(
+                transformationPlan.RepositoryName,
+                $"check {check}: running");
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
             var processResult =
                 await _mavenProcessRunner.RunAsync(
                     repositoryPath,
@@ -60,6 +69,10 @@ public sealed class TransformationValidator
                     cancellationToken);
 
             var passed = processResult.ExitCode == 0;
+
+            _progress.Report(
+                transformationPlan.RepositoryName,
+                $"check {check}: {(passed ? "passed" : "FAILED")} ({stopwatch.Elapsed.TotalSeconds:F0}s)");
 
             checkResults.Add(
                 new TransformationValidationCheckResult(
