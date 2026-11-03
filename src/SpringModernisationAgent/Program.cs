@@ -56,6 +56,17 @@ try
                 break;
             }
 
+        case "publish":
+            {
+                var publishCommand =
+                    new PublishCommand();
+
+                await publishCommand.ExecuteAsync(
+                    cancellationToken);
+
+                break;
+            }
+
         case "help":
         case "--help":
         case "-h":
@@ -136,6 +147,16 @@ static void WriteUsage()
     Console.WriteLine(
         "      Read-only: explain the latest migration results with AI " +
         "and generate the migration results document.");
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "  dotnet run --project " +
+        @".\src\SpringModernisationAgent -- publish");
+
+    Console.WriteLine(
+        "      Write reviewer summaries and, when enabled, open or update " +
+        "draft pull requests on migration branches (never merged).");
 
     Console.WriteLine();
 

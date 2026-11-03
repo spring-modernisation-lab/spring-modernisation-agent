@@ -185,23 +185,32 @@ Exposed to the model as Agent Framework function tools. All paths are relative, 
 
 ## Phase 5: Reviewer summary and draft PR
 
-- [ ] Reviewer summary, written to `Artifacts/summaries/<repo>.md`:
+- [x] Reviewer summary, written to `Artifacts/summaries/<repo>.md` (`PullRequestContentBuilder`; deterministic review flags from `ReviewFlagDetector`: security changes, request-mapping changes, calls the AI removed and never added back, CI file changes; the AI section reuses the results report's per-repository analysis):
   - **C# writes the facts:** files changed per stage (OpenRewrite vs AI), checks per attempt, final outcome, patch hashes, CI-file changes called out explicitly.
   - **AI writes the narrative** in one structured call: what OpenRewrite changed, what the AI changed and why, what the reviewer should check, and residual risks.
-- [ ] `IPullRequestPublisher` / `GitHubDraftPullRequestPublisher`, using Octokit (already referenced):
+- [x] `DraftPullRequestPublisher` with `IBranchPusher` (`GitBranchPusher`: token via git environment config, never in arguments) and `IPullRequestApi` (`OctokitPullRequestApi`):
   1. Fresh clone at the source SHA.
   2. `git apply` the cumulative patch.
   3. Commit with a bot identity.
   4. Push to `migration/spring-boot-3.5-java-21`. Force-push only to that branch, which makes it idempotent.
   5. Open or update a **draft** PR against the default branch, with the summary as the body.
   6. Record the PR URL in the result.
-- [ ] It never pushes to the default branch and never merges. It is off unless the workflow input `open-draft-pr` is set.
+- [x] It never pushes to the default branch and never merges. It is off unless the workflow input `open-draft-pr` is set.
 - [ ] `MIGRATION_GITHUB_TOKEN` needs Contents, Pull requests **and Workflows** read/write on the target repos, because recipes change `.github/workflows/*`.
-- [ ] Tests with a fake publisher and a fake git runner:
+- [x] Tests with a fake publisher and a fake git runner:
   - Skipped when disabled or there is no patch.
   - Branch name is fixed.
   - Existing PR is updated, not duplicated.
   - The default branch is never a push target.
+
+## Backlog: mechanical-only test edits (not for the demo)
+
+Today the Remediation Agent may not edit test sources at all; a test that needs changing is a human decision. For real estates, allow a narrow, deterministically checked exception:
+
+- [ ] Accept an AI edit to `src/test/**` only if every changed line is an `import` or an annotation (e.g. `javax.*` → `jakarta.*`, `@MockBean` → `@MockitoBean`, JUnit 4 → 5 annotations).
+- [ ] Reject the whole proposal if a test edit touches a method body, an assertion, an expected value or test data; the reason tells the agent this is a human decision.
+- [ ] Flag every accepted test edit in the reviewer summary.
+- [ ] Tests for each case (import-only accepted; assertion change rejected; mixed edit rejected).
 
 ## Phase 6: Document polish (small)
 

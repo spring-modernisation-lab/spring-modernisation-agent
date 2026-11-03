@@ -14,6 +14,12 @@ on:
         type: choice
         options: ["1", "2", "3", "4", "5"]
         default: "3"
+      open-draft-pull-requests:
+        description: >-
+          Open or update draft pull requests on migration branches for
+          repositories that passed or need a decision (never merged)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -251,6 +257,23 @@ jobs:
           --
           report
 
+      # Reviewer summaries are always written. Draft pull requests are only
+      # opened when chosen, on migration/ branches, and never merged.
+      - name: Reviewer summaries and draft pull requests
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.MIGRATION_GITHUB_TOKEN }}
+          MIGRATION_WORKSPACE_ROOT: ${{ runner.temp }}/spring-modernisation-publish
+          MIGRATION_PUBLISH_PULL_REQUESTS: ${{ inputs.open-draft-pull-requests && 'enabled' || 'disabled' }}
+        run: >
+          dotnet run
+          --project ./src/SpringModernisationAgent
+          --configuration Release
+          --no-build
+          --
+          publish
+
       - name: Upload transformation results
         if: always()
         uses: actions/upload-artifact@v5
@@ -264,4 +287,6 @@ jobs:
             Artifacts/migration-results-analysis.json
             Artifacts/spring-modernisation-migration-results.docx
             Artifacts/patches/**
+            Artifacts/summaries/**
+            Artifacts/pull-requests.json
           if-no-files-found: warn

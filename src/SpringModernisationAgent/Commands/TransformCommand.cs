@@ -41,7 +41,7 @@ public sealed class TransformCommand
             "transformation-results.json");
 
         var transformationPlans =
-            await ReadTransformationPlansAsync(
+            await TransformationPlansReader.ReadAsync(
                 transformationPlansPath,
                 cancellationToken);
 
@@ -533,46 +533,5 @@ public sealed class TransformCommand
         }
 
         return value;
-    }
-
-    private static async Task<
-        IReadOnlyList<TransformationPlan>>
-        ReadTransformationPlansAsync(
-            string path,
-            CancellationToken cancellationToken)
-    {
-        if (!File.Exists(path))
-        {
-            throw new FileNotFoundException(
-                "Transformation plans were not found.",
-                path);
-        }
-
-        await using var stream =
-            File.OpenRead(path);
-
-        var plans =
-            await JsonSerializer.DeserializeAsync<
-                List<TransformationPlan>>(
-                stream,
-                CreateJsonOptions(),
-                cancellationToken);
-
-        return plans
-            ?? throw new InvalidOperationException(
-                "Transformation plans could not be deserialized.");
-    }
-
-    private static JsonSerializerOptions CreateJsonOptions()
-    {
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        };
-
-        options.Converters.Add(
-            new JsonStringEnumConverter());
-
-        return options;
     }
 }

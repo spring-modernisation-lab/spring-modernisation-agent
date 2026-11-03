@@ -13,7 +13,8 @@ internal static class ExternalProcess
         string displayName,
         string workingDirectory,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -37,6 +38,12 @@ internal static class ExternalProcess
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        // Secrets go through the environment, never the argument list.
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>())
+        {
+            startInfo.Environment[name] = value;
         }
 
         using var process = new Process
