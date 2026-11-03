@@ -174,7 +174,11 @@ public class MigrationAnalysisInputBuilderTests
                             new TransformationValidationCheckResult(
                                 Check: "unit-tests",
                                 Passed: false,
-                                StandardOutput: "Test output.",
+                                StandardOutput:
+                                    "[INFO] Running tests\n" +
+                                    "[ERROR] Tests run: 8, Failures: 1\n" +
+                                    "[ERROR] Failed to execute goal surefire\n" +
+                                    "[ERROR] -> [Help 1]",
                                 StandardError: "Tests failed.")
                         ]));
 
@@ -209,13 +213,55 @@ public class MigrationAnalysisInputBuilderTests
         Assert.False(
             failedCheck.Passed);
 
+        // Only the extracted diagnostics reach the model, never raw logs.
         Assert.Equal(
-            "Test output.",
-            failedCheck.StandardOutput);
+            [
+                "[ERROR] Tests run: 8, Failures: 1",
+                "Tests failed."
+            ],
+            failedCheck.Diagnostics);
+
+        var passedCheck =
+            transformation.ValidationChecks[0];
+
+        Assert.Empty(passedCheck.Diagnostics);
+    }
+
+    [Fact]
+    public void Build_MapsExternalDependenciesSortedWithVersionAndScope()
+    {
+        var assessment = CreateProjectAssessment(
+            externalDependencies:
+            [
+                new MavenDependency(
+                    new MavenCoordinate(
+                        "org.apache.httpcomponents",
+                        "httpclient",
+                        Version: null),
+                    Scope: "compile",
+                    Optional: false),
+
+                new MavenDependency(
+                    new MavenCoordinate(
+                        "com.h2database",
+                        "h2",
+                        Version: "2.1.214"),
+                    Scope: "runtime",
+                    Optional: false)
+            ]);
+
+        var result = new MigrationAnalysisInputBuilder().Build(
+            assessment,
+            []);
+
+        var repository = Assert.Single(result.Repositories);
 
         Assert.Equal(
-            "Tests failed.",
-            failedCheck.StandardError);
+            [
+                "com.h2database:h2:2.1.214 (runtime)",
+                "org.apache.httpcomponents:httpclient (compile)"
+            ],
+            repository.ExternalDependencies);
     }
 
     [Fact]
@@ -335,7 +381,8 @@ public class MigrationAnalysisInputBuilderTests
                 null!));
     }
 
-    private static ProjectAssessment CreateProjectAssessment()
+    internal static ProjectAssessment CreateProjectAssessment(
+        IReadOnlyList<MavenDependency>? externalDependencies = null)
     {
         var route = CreateMigrationRoute();
 
@@ -382,7 +429,7 @@ public class MigrationAnalysisInputBuilderTests
                     Version: "1.0.0")
             ],
 
-            ExternalDependencies: [],
+            ExternalDependencies: externalDependencies ?? [],
 
             MigrationRoute:
                 new MigrationRouteSelection(

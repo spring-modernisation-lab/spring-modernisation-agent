@@ -134,6 +134,11 @@ jobs:
 
     timeout-minutes: 60
 
+    permissions:
+      contents: read
+      # For the optional AI results report (GitHub OIDC to Azure).
+      id-token: write
+
     steps:
       - name: Checkout migration application
         uses: actions/checkout@v6
@@ -198,10 +203,42 @@ jobs:
           --
           transform
 
+      # The AI results report is optional and read-only. It runs even when
+      # validation failed (that is when it is most useful), and its failure
+      # never changes the migration outcome.
+      - name: Sign in to Azure (GitHub OIDC)
+        id: azure_login
+        if: always() && vars.AZURE_CLIENT_ID != ''
+        continue-on-error: true
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Generate AI migration results report
+        if: always() && steps.azure_login.outcome == 'success'
+        continue-on-error: true
+        env:
+          FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
+          FOUNDRY_MODEL: ${{ vars.FOUNDRY_MODEL }}
+          FOUNDRY_AUTH_MODE: AzureCli
+        run: >
+          dotnet run
+          --project ./src/SpringModernisationAgent
+          --configuration Release
+          --no-build
+          --
+          report
+
       - name: Upload transformation results
         if: always()
         uses: actions/upload-artifact@v5
         with:
           name: transformation-results-${{ github.run_number }}
-          path: Artifacts/transformation-results.json
+          # The AI report files are optional; missing ones are skipped.
+          path: |
+            Artifacts/transformation-results.json
+            Artifacts/migration-results-analysis.json
+            Artifacts/spring-modernisation-migration-results.docx
           if-no-files-found: warn

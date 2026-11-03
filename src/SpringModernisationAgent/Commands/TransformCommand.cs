@@ -44,7 +44,7 @@ public sealed class TransformCommand
                 cancellationToken);
 
         var existingResults =
-            await ReadTransformationResultsAsync(
+            await new TransformationResultsReader().ReadAsync(
                 transformationResultsPath,
                 cancellationToken);
 
@@ -380,30 +380,6 @@ public sealed class TransformCommand
         return plans
             ?? throw new InvalidOperationException(
                 "Transformation plans could not be deserialized.");
-    }
-
-    private static async Task<
-        IReadOnlyList<TransformationExecutionResult>>
-        ReadTransformationResultsAsync(
-            string path,
-            CancellationToken cancellationToken)
-    {
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
-        await using var stream =
-            File.OpenRead(path);
-
-        var results =
-            await JsonSerializer.DeserializeAsync<
-                List<TransformationExecutionResult>>(
-                stream,
-                CreateJsonOptions(),
-                cancellationToken);
-
-        return results ?? [];
     }
 
     private static JsonSerializerOptions CreateJsonOptions()

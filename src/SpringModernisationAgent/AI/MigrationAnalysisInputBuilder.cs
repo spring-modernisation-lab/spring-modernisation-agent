@@ -1,4 +1,5 @@
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Transformation;
 
 namespace SpringModernisationAgent.AI;
 
@@ -73,6 +74,14 @@ public sealed class MigrationAnalysisInputBuilder
                 JavaVersion: route.Target.Java),
             MigrationRouteId: route.Id,
             InternalDependencies: internalDependencies,
+            ExternalDependencies:
+                repository.ExternalDependencies
+                    .Select(dependency =>
+                        $"{dependency.Coordinate} ({dependency.Scope})")
+                    .OrderBy(
+                        dependency => dependency,
+                        StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
             ReadinessStatus:
                 repository.MigrationReadiness?.Status.ToString()
                 ?? "NotEvaluated",
@@ -104,8 +113,11 @@ public sealed class MigrationAnalysisInputBuilder
                         new MigrationAnalysisValidationCheckInput(
                             Check: check.Check,
                             Passed: check.Passed,
-                            StandardOutput: check.StandardOutput,
-                            StandardError: check.StandardError))
+                            Diagnostics: check.Passed
+                                ? []
+                                : ValidationDiagnosticsExtractor.Extract(
+                                    check.StandardOutput,
+                                    check.StandardError)))
                     .ToList());
     }
 }

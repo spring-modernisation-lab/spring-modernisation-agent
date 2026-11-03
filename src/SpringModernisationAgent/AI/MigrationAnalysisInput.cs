@@ -14,6 +14,8 @@ public sealed record MigrationAnalysisRepositoryInput(
     MigrationAnalysisTargetInput Target,
     string MigrationRouteId,
     IReadOnlyList<string> InternalDependencies,
+    // Third-party Maven dependencies as "group:artifact[:version] (scope)".
+    IReadOnlyList<string> ExternalDependencies,
     string ReadinessStatus,
     IReadOnlyList<string> ReadinessReasons,
     MigrationAnalysisTransformationInput? Transformation);
@@ -32,8 +34,9 @@ public sealed record MigrationAnalysisTransformationInput(
 public sealed record MigrationAnalysisValidationCheckInput(
     string Check,
     bool Passed,
-    string? StandardOutput,
-    string? StandardError);
+    // Bounded failure lines from ValidationDiagnosticsExtractor; raw build
+    // logs (and workspace paths) are never sent to the model.
+    IReadOnlyList<string> Diagnostics);
 
 public sealed record MigrationAnalysisWaveInput(
     int Number,

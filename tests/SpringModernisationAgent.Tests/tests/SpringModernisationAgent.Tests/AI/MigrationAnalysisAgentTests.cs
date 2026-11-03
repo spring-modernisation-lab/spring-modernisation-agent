@@ -267,6 +267,8 @@ public class MigrationAnalysisAgentTests
 
             InternalDependencies: [],
 
+            ExternalDependencies: [],
+
             ReadinessStatus: "Ready",
 
             ReadinessReasons: [],

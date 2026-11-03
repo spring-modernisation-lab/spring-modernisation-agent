@@ -73,6 +73,13 @@ public sealed class MigrationAnalysisAgent
             10. Ground risks and recommendations in the supplied evidence.
             11. Do not propose arbitrary shell, Git or Maven commands.
             12. Return only the requested structured result.
+            13. You may use general knowledge of the named external
+                dependencies to identify upgrade risks for the target
+                platform, but present them as risks to verify, never as
+                observed results.
+            14. When validation diagnostics are supplied, group them by
+                root cause and explain each group, citing the affected
+                file paths exactly as they appear in the diagnostics.
 
             The strategy must:
             - provide a concise portfolio-level summary;

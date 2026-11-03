@@ -45,6 +45,17 @@ try
                 break;
             }
 
+        case "report":
+            {
+                var reportCommand =
+                    new ReportCommand();
+
+                await reportCommand.ExecuteAsync(
+                    cancellationToken);
+
+                break;
+            }
+
         case "help":
         case "--help":
         case "-h":
@@ -115,6 +126,16 @@ static void WriteUsage()
 
     Console.WriteLine(
         "      Explicitly execute one eligible migration wave.");
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "  dotnet run --project " +
+        @".\src\SpringModernisationAgent -- report");
+
+    Console.WriteLine(
+        "      Read-only: explain the latest migration results with AI " +
+        "and generate the migration results document.");
 
     Console.WriteLine();
 
