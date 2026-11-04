@@ -29,9 +29,9 @@ beans:
     startTypes: [CloseableHttpClient]
     fields: [timeToLive]
 
-  - id: HttpClient.idleEviction
-    startTypes: [CloseableHttpClient]
-    fields: [maxIdleTimeMs, maxIdleTime]
+  # Not probed: idle-connection eviction. HttpClient 5 keeps it only inside
+  # the evictor thread's code, which reflection cannot read, so a correct
+  # migration would always look different (probe #7, run 23 kept 60s).
 
   - id: HttpClient.connectTimeout
     startTypes: [CloseableHttpClient]

@@ -285,7 +285,8 @@ jobs:
             echo "- Route: \`${{ inputs.route }}\`"
             echo "- Source commit: \`$(cat "$OUTPUT_DIR/source-commit.txt" 2>/dev/null)\`"
             echo "- Post-migration build exit code: \`${EXIT_CODE:-not run}\`"
-            echo "- Compile errors: \`$(grep -oE '^\[INFO\] [0-9]+ errors?' "$OUTPUT_DIR/post-migration-build.log" 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)\`"
+            errors="$(grep -oE '^\[INFO\] [0-9]+ errors?' "$OUTPUT_DIR/post-migration-build.log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+            echo "- Compile errors: \`${errors:-0}\`"
             echo
             if [ -f "$OUTPUT_DIR/candidates.txt" ]; then
               echo "### Candidate recipes measured (not part of the route)"
