@@ -16,6 +16,13 @@ on:
         description: Migration route id from Config/spring.yaml
         required: true
         default: spring-boot-application-2.7-to-3
+      candidate-recipes:
+        description: >-
+          Optional recipe-discovery candidates to measure, run after the route's
+          recipes; comma-separated recipe@group:artifact:version. Measurement
+          only, never part of a route.
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -115,12 +122,68 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Candidates are measured on the code the route's recipes leave (the
+      # code the AI would otherwise see), so the route's changes are first
+      # committed in this throwaway clone. Nothing is ever pushed: the job has
+      # read-only permission on the target repository.
+      - name: Run candidate recipes (recipe discovery)
+        if: inputs.candidate-recipes != ''
+        working-directory: repo
+        env:
+          CANDIDATES: ${{ inputs.candidate-recipes }}
+        run: |
+          set -euo pipefail
+
+          git add -A
+          git -c user.name=probe -c user.email=probe@localhost -c commit.gpgsign=false \
+            commit --quiet --allow-empty -m "route recipes (probe only, never pushed)"
+
+          IFS=',' read -ra candidates <<< "$CANDIDATES"
+
+          for raw in "${candidates[@]}"; do
+            candidate="$(echo "$raw" | xargs)"
+
+            # recipe@group:artifact:version, nothing else reaches the shell.
+            if ! [[ "$candidate" =~ ^[A-Za-z0-9_.$]+@[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$ ]]; then
+              echo "::error::Candidate '$candidate' is not recipe@group:artifact:version"
+              exit 1
+            fi
+
+            recipe="${candidate%@*}"
+            coordinates="${candidate#*@}"
+
+            echo "::group::candidate $recipe ($coordinates)"
+            # A candidate that fails to run (for example, built for a newer
+            # OpenRewrite core) is a result to record, not a probe failure.
+            set +e
+            mvn --batch-mode \
+              "org.openrewrite.maven:rewrite-maven-plugin:${OPENREWRITE_MAVEN_PLUGIN_VERSION}:runNoFork" \
+              "-Drewrite.activeRecipes=${recipe}" \
+              "-Drewrite.recipeArtifactCoordinates=${coordinates}" \
+              2>&1 | tee -a "$OUTPUT_DIR/candidates.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "::endgroup::"
+
+            if [ "$status" -eq 0 ]; then
+              echo "- \`$recipe\` (\`$coordinates\`): ran" >> "$OUTPUT_DIR/candidates.txt"
+            else
+              echo "- \`$recipe\` (\`$coordinates\`): **failed to run** (exit $status); see candidates.log" >> "$OUTPUT_DIR/candidates.txt"
+            fi
+          done
+
+          git add -A
+          git diff --cached --stat | tee "$OUTPUT_DIR/candidates-diffstat.txt"
+          git diff --cached --binary > "$OUTPUT_DIR/candidates.patch"
+
       - name: Capture OpenRewrite changes
         working-directory: repo
         run: |
+          # Everything since the assessed commit: the route's recipes plus any candidates.
           git add -A
-          git diff --cached --stat | tee "$OUTPUT_DIR/openrewrite-diffstat.txt"
-          git diff --cached --binary > "$OUTPUT_DIR/openrewrite.patch"
+          source_commit="$(cat "$OUTPUT_DIR/source-commit.txt")"
+          git diff --cached --stat "$source_commit" | tee "$OUTPUT_DIR/openrewrite-diffstat.txt"
+          git diff --cached --binary "$source_commit" > "$OUTPUT_DIR/openrewrite.patch"
 
       - name: Post-migration build
         id: post_migration
@@ -150,7 +213,19 @@ jobs:
             echo "- Route: \`${{ inputs.route }}\`"
             echo "- Source commit: \`$(cat "$OUTPUT_DIR/source-commit.txt" 2>/dev/null)\`"
             echo "- Post-migration build exit code: \`${EXIT_CODE:-not run}\`"
+            echo "- Compile errors: \`$(grep -oE '^\[INFO\] [0-9]+ errors?' "$OUTPUT_DIR/post-migration-build.log" 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)\`"
             echo
+            if [ -f "$OUTPUT_DIR/candidates.txt" ]; then
+              echo "### Candidate recipes measured (not part of the route)"
+              echo
+              cat "$OUTPUT_DIR/candidates.txt"
+              echo
+              echo "Files the candidates changed, on top of the route's recipes:"
+              echo '```'
+              cat "$OUTPUT_DIR/candidates-diffstat.txt" 2>/dev/null || echo "(none)"
+              echo '```'
+              echo
+            fi
             echo "### Files changed by OpenRewrite"
             echo '```'
             cat "$OUTPUT_DIR/openrewrite-diffstat.txt" 2>/dev/null || echo "(none)"
