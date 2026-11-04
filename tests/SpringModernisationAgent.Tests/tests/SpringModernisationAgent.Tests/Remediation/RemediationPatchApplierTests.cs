@@ -178,6 +178,27 @@ public class RemediationPatchApplierTests : IDisposable
     }
 
     [Fact]
+    public void Apply_AnonymousClassBetweenComparisons_IsStillRejected()
+    {
+        // Run 23: "ttl > 0" and "age < max" were read as generics and the
+        // code between them, including the anonymous class, was ignored.
+        var result = Apply(Edit(
+            SecurityPath,
+            "    void configure() {}\n",
+            "    Cache cache(long ttl, long age, long max) {\n" +
+            "        if (ttl > 0) { System.gc(); }\n" +
+            "        java.util.Map<String, java.util.List<Long>> times = null;\n" +
+            "        Cache made = new Cache() {\n" +
+            "            public String getName() { return \"x\"; }\n" +
+            "        };\n" +
+            "        return age < max ? made : null;\n" +
+            "    }\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("adds anonymous classes (Cache)", result.RejectionReason);
+    }
+
+    [Fact]
     public void Apply_ExistingAnonymousClassesAndArrayInitialisersAndLambdas_AreAllowed()
     {
         Write(ClientPath,

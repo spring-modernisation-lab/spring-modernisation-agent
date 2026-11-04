@@ -43,7 +43,7 @@ public static class PullRequestContentBuilder
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(flags);
 
-        var needsDecision = result.Remediation?.Outcome == RemediationOutcome.NeedsHumanDecision;
+        var needsDecision = result.NeedsDecision;
         var cumulative = result.Patches.FirstOrDefault(patch => patch.Stage == "cumulative");
 
         if ((!result.Succeeded && !needsDecision)
@@ -69,7 +69,7 @@ public static class PullRequestContentBuilder
 
         if (needsDecision)
         {
-            AppendDecision(body, result.Remediation!);
+            AppendDecision(body, result);
         }
 
         AppendUnsupportedLibraries(body, result);
@@ -102,13 +102,47 @@ public static class PullRequestContentBuilder
 
     private static void AppendDecision(
         StringBuilder body,
-        RemediationReport remediation)
+        TransformationExecutionResult result)
     {
-        var proposal = remediation.Attempts.LastOrDefault()?.Proposal;
+        var agentAsked = result.Remediation?.Outcome == RemediationOutcome.NeedsHumanDecision;
+        var proposal = agentAsked ? result.Remediation!.Attempts.LastOrDefault()?.Proposal : null;
 
         body.AppendLine("## Decision needed");
         body.AppendLine();
-        body.AppendLine("The Remediation Agent stopped because the remaining fix needs a person to choose.");
+
+        if (agentAsked)
+        {
+            body.AppendLine("The Remediation Agent stopped because the remaining fix needs a person to choose.");
+        }
+
+        var known = result.UnsupportedLibraries
+            .Select(UnsupportedLibraries.Find)
+            .OfType<UnsupportedLibrary>()
+            .Select(library => library.Name)
+            .ToList();
+
+        if (known.Count > 0)
+        {
+            if (agentAsked)
+            {
+                body.AppendLine();
+            }
+
+            var names = string.Join(", ", known);
+
+            body.AppendLine(
+                $"This repository still declares {names}, which Spring Boot 3 no longer supports. The pipeline " +
+                "never lets the AI change `pom.xml`, so the library is still there whatever Maven decided: choose a " +
+                "replacement and follow the manual steps below.");
+
+            if (result.Validation.Status == TransformationValidationStatus.Passed)
+            {
+                body.AppendLine();
+                body.AppendLine(
+                    "**Maven passed anyway.** That means the AI's changes work around the library rather than " +
+                    "replace it. Read them closely, starting with the review flags, before keeping any of them.");
+            }
+        }
 
         if (proposal is not null)
         {

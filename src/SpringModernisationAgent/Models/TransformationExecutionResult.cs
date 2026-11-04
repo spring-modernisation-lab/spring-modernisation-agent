@@ -4,9 +4,26 @@ public sealed record TransformationExecutionResult(
     TransformationResult Transformation,
     TransformationValidationResult Validation)
 {
+    /// <summary>
+    /// Migrated and validated, with nothing left for a person to decide. A
+    /// repository that still uses an unsupported library never succeeds,
+    /// even when Maven passes: the AI cannot edit <c>pom.xml</c>, so a green
+    /// build means the library was worked around, not replaced (run 23).
+    /// </summary>
     public bool Succeeded =>
         Transformation.Status == TransformationStatus.Succeeded
-        && Validation.Status == TransformationValidationStatus.Passed;
+        && Validation.Status == TransformationValidationStatus.Passed
+        && UnsupportedLibraries.Count == 0;
+
+    /// <summary>
+    /// A person must choose before this can proceed: the Remediation Agent
+    /// asked for a decision, or the repository still uses a library the
+    /// target platform dropped.
+    /// </summary>
+    public bool NeedsDecision =>
+        Transformation.Status == TransformationStatus.Succeeded
+        && (Remediation?.Outcome == RemediationOutcome.NeedsHumanDecision
+            || UnsupportedLibraries.Count > 0);
 
     /// <summary>
     /// Preserved patches, in stage order, plus <c>cumulative</c>. Empty for

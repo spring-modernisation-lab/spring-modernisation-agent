@@ -39,7 +39,9 @@ public static class TransformationSummaryWriter
                     : result.Transformation.Status.ToString(),
                 DescribeValidation(result.Validation),
                 remediation,
-                result.Succeeded ? "✅ Succeeded" : "❌ Failed"));
+                result.Succeeded ? "✅ Succeeded"
+                    : result.NeedsDecision ? "⚠️ Needs decision"
+                    : "❌ Failed"));
         }
 
         foreach (var result in results.Where(result => result.Remediation?.Attempts.Count > 0))

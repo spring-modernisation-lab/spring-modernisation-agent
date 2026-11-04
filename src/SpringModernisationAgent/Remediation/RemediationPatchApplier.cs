@@ -404,7 +404,11 @@ public sealed partial class RemediationPatchApplier
     [GeneratedRegex(@"\b(?:extends|implements)\s+([\w.\s,]+?)(?=\b(?:extends|implements|permits)\b|$)")]
     private static partial Regex SupertypeClause();
 
-    [GeneratedRegex(@"<[^<>]*>")]
+    // Only what type arguments contain (names, dots, commas, spaces, ?, []),
+    // so comparisons such as "ttl > 0 ... age < max" are never taken for
+    // generics. Run 23: the wider pattern deleted the code between them,
+    // anonymous classes included.
+    [GeneratedRegex(@"<[\w ,.?\[\]]*>")]
     private static partial Regex GenericArguments();
 
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]

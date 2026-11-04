@@ -171,7 +171,9 @@ public sealed class TransformCommand
                 $"  Overall: " +
                 $"{(result.Succeeded
                     ? "Succeeded"
-                    : "Failed")}");
+                    : result.NeedsDecision
+                        ? "Needs decision"
+                        : "Failed")}");
 
             if (result.Transformation.ChangedFiles.Count > 0)
             {

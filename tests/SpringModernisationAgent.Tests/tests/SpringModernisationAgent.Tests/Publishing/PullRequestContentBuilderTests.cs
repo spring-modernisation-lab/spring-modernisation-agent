@@ -81,6 +81,40 @@ public class PullRequestContentBuilderTests
     }
 
     [Fact]
+    public void Build_MavenPassedButAnUnsupportedLibraryRemains_IsADecisionNotASuccess()
+    {
+        // Run 23: "Fixed" only because the AI hand-wrote a cache around Ehcache 2.
+        var result = CreateResult(passed: true, RemediationOutcome.Fixed) with
+        {
+            UnsupportedLibraries = ["Ehcache 2"]
+        };
+
+        var content = PullRequestContentBuilder.Build(CreatePlan(), result, [], null)!;
+
+        Assert.True(content.NeedsDecision);
+        Assert.StartsWith("[Needs decision] ", content.Title);
+        Assert.Contains("This repository still declares Ehcache 2", content.Body);
+        Assert.Contains("**Maven passed anyway.**", content.Body);
+        Assert.DoesNotContain("The Remediation Agent stopped", content.Body);
+        Assert.DoesNotContain("Why (AI-generated)", content.Body);
+        Assert.Contains("## Unsupported libraries: manual steps", content.Body);
+    }
+
+    [Fact]
+    public void Build_AttemptsExhaustedButAnUnsupportedLibraryRemains_StillGetsADecisionPullRequest()
+    {
+        var result = CreateResult(passed: false, RemediationOutcome.AttemptsExhausted) with
+        {
+            UnsupportedLibraries = ["Ehcache 2"]
+        };
+
+        var content = PullRequestContentBuilder.Build(CreatePlan(), result, [], null)!;
+
+        Assert.True(content.NeedsDecision);
+        Assert.DoesNotContain("Maven passed anyway", content.Body);
+    }
+
+    [Fact]
     public void Build_NoUnsupportedLibraries_HasNoManualStepsSection()
     {
         var body = PullRequestContentBuilder.Build(CreatePlan(), CreateResult(passed: true, RemediationOutcome.Fixed), [], null)!.Body;

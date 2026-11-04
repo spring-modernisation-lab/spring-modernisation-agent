@@ -24,6 +24,17 @@ public class TransformationSummaryWriterTests
     }
 
     [Fact]
+    public void Render_PassedButStillUsingAnUnsupportedLibrary_ShowsNeedsDecision()
+    {
+        var markdown = TransformationSummaryWriter.Render(
+        [
+            Result("orders-service", passed: true, changedFiles: 7) with { UnsupportedLibraries = ["Ehcache 2"] }
+        ]);
+
+        Assert.Contains("| orders-service | 7 files changed | Passed | not enabled | ⚠️ Needs decision |", markdown);
+    }
+
+    [Fact]
     public void Render_RemediationAttempts_ShowWhatEachAttemptDid()
     {
         var edits = new[]

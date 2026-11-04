@@ -69,6 +69,13 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
   - A NeedsHumanDecision proposal may now include fixes for problems that do not depend on the decision. They pass the same guardrails and are validated once, then the run stops for the decision.
   - The instructions forbid options that break the rules.
   - From `7c435f0`, the PR also lists the pipeline's fixed manual steps for unsupported libraries.
+- **Run 23** (`99adb50`): **orders-service came back "Fixed" in 4 attempts, and it shouldn't have.**
+  - Good: attempt 2 fixed the `javax.servlet` check (trap 3) and attempt 3 fixed the trailing-slash 404 (trap 5). The PR showed the manual-steps section and a "Large new code" flag on `CacheConfiguration`.
+  - Bad: attempt 2 added a fallback `ConcurrentMapCacheManager` (no expiry or size limit). Attempt 3 rewrote `CacheConfiguration` (161 lines) to parse `ehcache.xml` by hand and return anonymous `new CacheManager() {}` / `new Cache() {}` classes with their own TTL logic.
+  - Why the guardrail missed it: the generics-stripping pattern `<[^<>]*>` read `ttl > 0 ... age < max` as type arguments and deleted the code between them, anonymous classes included.
+- **Response:**
+  - The pattern now matches only characters that can appear in type arguments. Replay: run 23 attempt 3 is rejected (`adds anonymous classes (Cache, CacheManager)`), and every earlier replay is unchanged.
+  - New deterministic rule: a repository that still uses an unsupported library never "succeeds", even if Maven passes. The AI cannot edit `pom.xml`, so a green build means the library was worked around. The outcome is **Needs decision**, the PR is `[Needs decision]` with a pipeline-written explanation ("Maven passed anyway ..."), and it does not count as succeeded for wave progression.
 
 Demo talking point: *Maven decided the build is green; review found two behaviour changes the tests do not cover. That is why the output is a draft PR with a reviewer summary, not a merge.*
 

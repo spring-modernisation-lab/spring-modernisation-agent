@@ -132,6 +132,12 @@ public sealed class MigrationResultsDocumentWriter
             "from that evidence and are explanatory only.");
     }
 
+    private static string Outcome(
+        TransformationExecutionResult result) =>
+        result.Succeeded ? "Succeeded"
+        : result.NeedsDecision ? "Needs decision"
+        : "Failed";
+
     private static void AddSummary(
         Body body,
         IReadOnlyList<RepositoryAssessment> repositories,
@@ -146,12 +152,14 @@ public sealed class MigrationResultsDocumentWriter
             .ToList();
 
         var succeeded = executed.Count(result => result.Succeeded);
+        var needDecision = executed.Count(result => !result.Succeeded && result.NeedsDecision);
 
         AddParagraph(
             body,
             $"{executed.Count} of {repositories.Count} repositories have " +
-            $"been migrated and validated: {succeeded} succeeded and " +
-            $"{executed.Count - succeeded} failed. " +
+            $"been migrated and validated: {succeeded} succeeded, " +
+            $"{needDecision} need a decision and " +
+            $"{executed.Count - succeeded - needDecision} failed. " +
             $"{repositories.Count - executed.Count} are not yet executed.");
 
         AddHeading(body, "AI summary", 2);
@@ -212,7 +220,7 @@ public sealed class MigrationResultsDocumentWriter
                 result.Transformation.Status.ToString(),
                 result.Validation.Status.ToString(),
                 result.Transformation.ChangedFiles.Count.ToString(),
-                result.Succeeded ? "Succeeded" : "Failed"
+                Outcome(result)
             ]);
         }
 
@@ -277,7 +285,7 @@ public sealed class MigrationResultsDocumentWriter
         AddLabelledParagraph(
             body,
             "Outcome",
-            result.Succeeded ? "Succeeded" : "Failed");
+            Outcome(result));
 
         AddHeading(body, "OpenRewrite recipes applied", 3);
 

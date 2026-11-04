@@ -20,6 +20,45 @@ public class TransformationExecutionResultTests
     }
 
     [Fact]
+    public void Succeeded_MavenPassedButAnUnsupportedLibraryRemains_NeedsADecisionInstead()
+    {
+        // Run 23: green only because the AI worked around Ehcache 2.
+        var result = new TransformationExecutionResult(
+            Transformation: CreateTransformationResult(TransformationStatus.Succeeded),
+            Validation: CreateValidationResult(TransformationValidationStatus.Passed))
+        {
+            UnsupportedLibraries = ["Ehcache 2"]
+        };
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.NeedsDecision);
+    }
+
+    [Fact]
+    public void NeedsDecision_NoUnsupportedLibrariesAndNoAgentDecision_IsFalse()
+    {
+        var result = new TransformationExecutionResult(
+            Transformation: CreateTransformationResult(TransformationStatus.Succeeded),
+            Validation: CreateValidationResult(TransformationValidationStatus.Passed));
+
+        Assert.True(result.Succeeded);
+        Assert.False(result.NeedsDecision);
+    }
+
+    [Fact]
+    public void NeedsDecision_OpenRewriteFailed_IsFalseEvenWithUnsupportedLibraries()
+    {
+        var result = new TransformationExecutionResult(
+            Transformation: CreateTransformationResult(TransformationStatus.Failed),
+            Validation: CreateValidationResult(TransformationValidationStatus.NotRun))
+        {
+            UnsupportedLibraries = ["Ehcache 2"]
+        };
+
+        Assert.False(result.NeedsDecision);
+    }
+
+    [Fact]
     public void Succeeded_TransformationFailedAndValidationPassed_ReturnsFalse()
     {
         var result = new TransformationExecutionResult(

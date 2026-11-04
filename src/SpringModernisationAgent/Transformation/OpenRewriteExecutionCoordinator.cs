@@ -219,7 +219,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
             _progress.Report(
                 repository,
-                $"finished: {(result.Succeeded ? "Succeeded" : "Failed")} " +
+                $"finished: {(result.Succeeded ? "Succeeded" : result.NeedsDecision ? "Needs decision" : "Failed")} " +
                 $"({started.Elapsed.TotalSeconds:F0}s)");
 
             return result;
