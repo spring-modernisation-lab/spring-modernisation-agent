@@ -134,6 +134,13 @@ Consequences:
 - **"Better or reverted" falls out of the acceptance rule.** R24's broken servlet fix fails rule 1: `HttpServletRequest` still isn't found. And as a `K-MECHANICAL` problem, T3 would never reach the AI at all.
 - **Cost is bounded per problem,** not per repository.
 
+**As built (8.4):**
+- **One task per mapping.** The problems that share a mapping (for example `MoneyUserType` and `CustomerOrder`) are one task over all their files, so tasks never share a file and each can be reverted on its own.
+- **Obligations are checked once everything compiles.** A half-ported repository can't start, so a **contract gate** runs one behaviour comparison after the last task and checks every kept port's obligations (`obligations:` in `api-mappings.yaml`, as contract item globs). A port that broke one gets its repair; if it still breaks one, its files go back to the recipes' output and the revert is recorded as a patch. That is at most two probe runs per repository.
+- **Platform differences are not held against a port.** `behaviour-signatures.yaml` names differences the platform causes whatever a port does, for example Spring 6 no longer matching a trailing slash (`BS-TRAILING-SLASH`). They go to a person as decisions.
+- **"Nothing new fails" allows for how javac reports.** Fixing one file can let javac report another file's errors for the first time. A new failure counts against the port when it is in the port's files or matches no signature. The build moving on to a later check is progress.
+- **Replayed on run 26's records,** the gate keeps the security port (its four trailing-slash 404s are the platform's) and catches the HttpClient port's lost `connectionTimeToLive`, which the open loop had accepted in three runs.
+
 ## 5. Durable fixes: the AI writes the recipe, not the patch
 
 When a person accepts a scoped port in a draft PR, the work isn't finished until it's **durable**:
