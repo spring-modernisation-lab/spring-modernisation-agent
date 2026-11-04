@@ -63,6 +63,47 @@ public class RemediationPatchApplierTests : IDisposable
     }
 
     [Fact]
+    public void Apply_ScopedToATask_AnEditOutsideItsFilesRejectsTheWholeProposal()
+    {
+        // Run 26 attempt 2 changed application.yml; a scoped port may change only its own files.
+        var result = new RemediationPatchApplier().Apply(
+            Repository,
+            [
+                Edit(ClientPath, "builder.setMaxConnTotal(20);", "connectionManager.setMaxTotal(20);"),
+                Edit("src/main/resources/application.yml", "port: 8080", "port: 8081")
+            ],
+            allowedFiles: [ClientPath]);
+
+        Assert.False(result.Applied);
+        Assert.Contains("edit 2 ('src/main/resources/application.yml'): this task may change only", result.RejectionReason);
+        Assert.Contains(ClientPath, result.RejectionReason);
+        Assert.Equal(ClientSource, Read(ClientPath));
+    }
+
+    [Fact]
+    public void Apply_ScopedToATask_ItsOwnFilesAreAllowed_AndPathsAreNormalised()
+    {
+        var result = new RemediationPatchApplier().Apply(
+            Repository,
+            [Edit("./" + ClientPath.Replace('/', '\\'), "builder.setMaxConnTotal(20);", "connectionManager.setMaxTotal(20);")],
+            allowedFiles: [ClientPath]);
+
+        Assert.True(result.Applied, result.RejectionReason);
+    }
+
+    [Fact]
+    public void Preview_ScopedToATask_RejectsTheSameWayAsApply()
+    {
+        var preview = new RemediationPatchApplier().Preview(
+            Repository,
+            [Edit(SecurityPath, " extends WebSecurityConfigurerAdapter", string.Empty)],
+            allowedFiles: [ClientPath]);
+
+        Assert.False(preview.Accepted);
+        Assert.Contains("this task may change only", preview.RejectionReason);
+    }
+
+    [Fact]
     public void Apply_NewFileUnderSrcMain_IsCreated()
     {
         const string path = "src/main/resources/application-production.yml";

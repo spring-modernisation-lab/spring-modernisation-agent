@@ -420,7 +420,7 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
   - `PortAcceptance.Judge(task, before, after)`: evidence gone, nothing new fails (the rules above), plus the reason when not.
   - Contract gate: `ObligationCheck(tasks, comparison, behaviourSignatures)` → for each task, the obligation differences that platform signatures don't explain.
 - [x] **4. Restore.** (`IWorkspaceRestorer` on the git recorder; tested on real repositories: only the named files move, a file the tree lacked is deleted, and paths outside the repository are refused.) `IWorkspacePatchRecorder.RestoreAsync(path, treeId, files)`: `git checkout <tree> -- <file>` for files in the tree, and delete files that aren't. A reverted attempt's patch is still recorded and published, labelled reverted. The chain's base stays at the task's base tree.
-- [ ] **5. Applier scope.** `Apply(path, edits, allowedFiles)`: an edit outside the task's files is rejected with the reason. The existing guardrails stay as the backstop.
+- [x] **5. Applier scope.** (`allowedFiles` on `Apply` and `Preview`, and on the tools so previews reject the same way; 3 tests.) `Apply(path, edits, allowedFiles)`: an edit outside the task's files is rejected with the reason. The existing guardrails stay as the backstop.
 - [ ] **6. Port agent request and instructions.**
   - `PortRequest`: the task, its mapping's notes, `mustKeep`, its obligations with their baseline values, its files, its evidence, and on a repair the exact failure.
   - Instructions rewritten for one task. Read tools stay repo-wide (reading is harmless and helps); `preview_edits` uses the task's scope.

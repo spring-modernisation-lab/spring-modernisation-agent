@@ -47,11 +47,16 @@ public sealed partial class RemediationPatchApplier
         ".git", ".github", ".mvn", "target", "node_modules"
     };
 
+    /// <param name="allowedFiles">
+    /// A scoped port's files (repository-relative): an edit to any other file
+    /// rejects the whole proposal. Null means no scope (the guardrails alone).
+    /// </param>
     public RemediationApplyResult Apply(
         string repositoryPath,
-        IReadOnlyList<RemediationEdit> edits)
+        IReadOnlyList<RemediationEdit> edits,
+        IReadOnlyCollection<string>? allowedFiles = null)
     {
-        var (pending, appliedEdits, rejection) = Prepare(repositoryPath, edits);
+        var (pending, appliedEdits, rejection) = Prepare(repositoryPath, edits, allowedFiles);
 
         if (pending is null)
         {
@@ -79,9 +84,10 @@ public sealed partial class RemediationPatchApplier
     /// </summary>
     public RemediationPreviewResult Preview(
         string repositoryPath,
-        IReadOnlyList<RemediationEdit> edits)
+        IReadOnlyList<RemediationEdit> edits,
+        IReadOnlyCollection<string>? allowedFiles = null)
     {
-        var (pending, _, rejection) = Prepare(repositoryPath, edits);
+        var (pending, _, rejection) = Prepare(repositoryPath, edits, allowedFiles);
 
         return pending is null
             ? new RemediationPreviewResult(false, rejection, new Dictionary<string, string>())
@@ -94,7 +100,8 @@ public sealed partial class RemediationPatchApplier
     /// <summary>Checks every edit and computes the new contents in memory.</summary>
     private (Dictionary<string, PendingFile>? Pending, List<AppliedEdit> Edits, string? Rejection) Prepare(
         string repositoryPath,
-        IReadOnlyList<RemediationEdit> edits)
+        IReadOnlyList<RemediationEdit> edits,
+        IReadOnlyCollection<string>? allowedFiles)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
         ArgumentNullException.ThrowIfNull(edits);
@@ -123,6 +130,11 @@ public sealed partial class RemediationPatchApplier
             }
 
             var relativePath = Normalise(edit.Path);
+
+            if (allowedFiles is not null && !allowedFiles.Contains(relativePath, StringComparer.Ordinal))
+            {
+                return (null, [], $"{label}: this task may change only {string.Join(", ", allowedFiles)}.");
+            }
             var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
 
             if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))

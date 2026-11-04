@@ -43,6 +43,10 @@ public sealed class RemediationWorkspaceTools
     private readonly IReadOnlyList<string> _diagnostics;
     private readonly int _maxCalls;
     private readonly IJavaClassInspector? _classInspector;
+
+    // A scoped port's files: previews reject edits elsewhere, as Apply will.
+    // Reading stays repository-wide.
+    private readonly IReadOnlyCollection<string>? _allowedFiles;
     private readonly List<RemediationToolCall> _calls = [];
     private readonly Lock _gate = new();
 
@@ -51,7 +55,8 @@ public sealed class RemediationWorkspaceTools
         string openRewritePatch,
         IReadOnlyList<string> diagnostics,
         int maxCalls = DefaultMaxCalls,
-        IJavaClassInspector? classInspector = null)
+        IJavaClassInspector? classInspector = null,
+        IReadOnlyCollection<string>? allowedFiles = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
         ArgumentNullException.ThrowIfNull(openRewritePatch);
@@ -59,6 +64,7 @@ public sealed class RemediationWorkspaceTools
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCalls);
 
         _root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryPath));
+        _allowedFiles = allowedFiles;
         _openRewritePatch = openRewritePatch;
         _diagnostics = diagnostics;
         _maxCalls = maxCalls;
@@ -238,7 +244,7 @@ public sealed class RemediationWorkspaceTools
     {
         return Run("preview_edits", $"{edits?.Count ?? 0} edits", () =>
         {
-            var preview = new RemediationPatchApplier().Preview(_root, edits ?? []);
+            var preview = new RemediationPatchApplier().Preview(_root, edits ?? [], _allowedFiles);
 
             if (!preview.Accepted)
             {
