@@ -164,6 +164,71 @@ public class RemediationPatchApplierTests : IDisposable
     }
 
     [Fact]
+    public void Apply_AnonymousClassImplementingAFrameworkInterface_IsRejected()
+    {
+        // Run 20 attempt 2's shape.
+        var result = Apply(Edit(
+            SecurityPath,
+            "    void configure() {}\n",
+            "    Cache getCache(String name) {\n        return new Cache() {\n            public String getName() { return name; }\n        };\n    }\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("adds anonymous classes (Cache)", result.RejectionReason);
+        Assert.Equal(SecuritySource, Read(SecurityPath));
+    }
+
+    [Fact]
+    public void Apply_ExistingAnonymousClassesAndArrayInitialisersAndLambdas_AreAllowed()
+    {
+        Write(ClientPath,
+            "class InventoryClientConfiguration {\n" +
+            "    Runnable task = new Runnable() { public void run() {} };\n" +
+            "}\n");
+
+        var result = Apply(Edit(
+            ClientPath,
+            "    Runnable task = new Runnable() { public void run() {} };\n",
+            "    Runnable task = new Runnable() { public void run() { System.gc(); } };\n" +
+            "    String[] names = new String[] { \"a\" };\n" +
+            "    Runnable other = () -> {};\n"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_ExistingTypeMadeToImplementANewInterface_IsRejected()
+    {
+        var result = Apply(Edit(
+            SecurityPath,
+            "public class SecurityConfiguration extends WebSecurityConfigurerAdapter {",
+            "public class SecurityConfiguration extends WebSecurityConfigurerAdapter implements org.springframework.cache.CacheManager {"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("extend or implement new types (SecurityConfiguration: CacheManager)", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_RemovingASupertypeOrChangingItsGenericArguments_IsAllowed()
+    {
+        Write(ClientPath,
+            "class MoneyUserType implements UserType, Serializable {\n}\n");
+
+        var generic = Apply(Edit(
+            ClientPath,
+            "implements UserType, Serializable {",
+            "implements org.hibernate.usertype.UserType<Map<String, Money>>, Serializable {"));
+
+        Assert.True(generic.Applied, generic.RejectionReason);
+
+        var removed = Apply(Edit(
+            SecurityPath,
+            "public class SecurityConfiguration extends WebSecurityConfigurerAdapter {",
+            "public class SecurityConfiguration {"));
+
+        Assert.True(removed.Applied, removed.RejectionReason);
+    }
+
+    [Fact]
     public void Apply_RewritingAFileThatKeepsItsTypes_IsAllowed()
     {
         var result = Apply(Edit(

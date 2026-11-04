@@ -176,13 +176,35 @@ public sealed partial class RemediationPatchApplier
 
             if (extension is ".java" or ".kt")
             {
-                var before = TypeNames(file.OriginalContent);
-                var added = TypeNames(file.Content).Except(before, StringComparer.Ordinal).ToList();
+                var before = StripCode(file.OriginalContent);
+                var after = StripCode(file.Content);
+                var added = TypeNames(after).Except(TypeNames(before), StringComparer.Ordinal).ToList();
 
                 if (added.Count > 0)
                 {
                     return $"'{relativePath}': adds new types ({string.Join(", ", added)}); writing a new " +
                            "component is a design decision. Change the existing types, or choose NeedsHumanDecision.";
+                }
+
+                // Run 20: the same new component, written as an anonymous
+                // class returned from an existing type made to implement a
+                // framework interface.
+                var anonymous = NewAnonymousClasses(before, after);
+
+                if (anonymous.Count > 0)
+                {
+                    return $"'{relativePath}': adds anonymous classes ({string.Join(", ", anonymous)}); implementing " +
+                           "a framework or library interface yourself is a design decision. Change the existing code, " +
+                           "or choose NeedsHumanDecision.";
+                }
+
+                var supertypes = NewSupertypes(before, after);
+
+                if (supertypes.Count > 0)
+                {
+                    return $"'{relativePath}': makes existing types extend or implement new types " +
+                           $"({string.Join(", ", supertypes)}); that turns them into a new component, which is a " +
+                           "design decision. Change the existing code, or choose NeedsHumanDecision.";
                 }
             }
 
@@ -205,17 +227,101 @@ public sealed partial class RemediationPatchApplier
         return null;
     }
 
-    private static IReadOnlyList<string> TypeNames(
+    /// <summary>Code without comments or string contents, so neither can hide or fake a declaration.</summary>
+    private static string StripCode(
         string code)
     {
         var stripped = StringLiteral().Replace(BlockComment().Replace(code, " "), "\"\"");
-        stripped = LineComment().Replace(stripped, string.Empty);
+        return LineComment().Replace(stripped, string.Empty);
+    }
 
-        return TypeDeclaration().Matches(stripped)
+    private static IReadOnlyList<string> TypeNames(
+        string stripped) =>
+        TypeDeclaration().Matches(stripped)
             .Select(match => match.Groups[1].Value)
             .Distinct(StringComparer.Ordinal)
             .ToList();
+
+    /// <summary>Base types of anonymous classes the edit adds (more of them than before).</summary>
+    private static IReadOnlyList<string> NewAnonymousClasses(
+        string before,
+        string after)
+    {
+        static Dictionary<string, int> Count(string code) =>
+            AnonymousClass().Matches(RemoveGenerics(code))
+                .GroupBy(match => SimpleName(match.Groups[1].Value), StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+        var original = Count(before);
+
+        return Count(after)
+            .Where(entry => entry.Value > original.GetValueOrDefault(entry.Key))
+            .Select(entry => entry.Key)
+            .Order(StringComparer.Ordinal)
+            .ToList();
     }
+
+    /// <summary>
+    /// Supertypes added to types that already existed, as "Type: Supertype".
+    /// Generic arguments are ignored, so <c>UserType</c> to
+    /// <c>UserType&lt;Money&gt;</c> is not a new supertype.
+    /// </summary>
+    private static IReadOnlyList<string> NewSupertypes(
+        string before,
+        string after)
+    {
+        var original = Supertypes(before);
+
+        return Supertypes(after)
+            .Where(entry => original.ContainsKey(entry.Key))
+            .SelectMany(entry => entry.Value
+                .Except(original[entry.Key], StringComparer.Ordinal)
+                .Select(supertype => $"{entry.Key}: {supertype}"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static Dictionary<string, HashSet<string>> Supertypes(
+        string stripped)
+    {
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (Match match in TypeHeader().Matches(RemoveGenerics(stripped)))
+        {
+            var names = result.TryGetValue(match.Groups[1].Value, out var existing)
+                ? existing
+                : result[match.Groups[1].Value] = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (Match clause in SupertypeClause().Matches(match.Groups[2].Value))
+            {
+                foreach (var name in clause.Groups[1].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                {
+                    names.Add(SimpleName(name));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static string RemoveGenerics(
+        string code)
+    {
+        string previous;
+
+        do
+        {
+            previous = code;
+            code = GenericArguments().Replace(code, string.Empty);
+        }
+        while (code != previous);
+
+        return code;
+    }
+
+    private static string SimpleName(
+        string name) =>
+        name.Trim().Split('.')[^1];
 
     /// <summary>File names (and test class names) that exist only under a src/test folder.</summary>
     private static HashSet<string> TestOnlyFileNames(
@@ -265,6 +371,20 @@ public sealed partial class RemediationPatchApplier
 
     [GeneratedRegex(@"\b(?:class|interface|record|enum|object)\s+([A-Z][A-Za-z0-9_]*)")]
     private static partial Regex TypeDeclaration();
+
+    // new Cache() {   new Foo(a, b(c)) {   (array initialisers have no parentheses)
+    [GeneratedRegex(@"\bnew\s+([A-Za-z_][\w.]*)\s*\((?:[^()]|\([^()]*\))*\)\s*\{")]
+    private static partial Regex AnonymousClass();
+
+    // The header between a type's name and its opening brace.
+    [GeneratedRegex(@"\b(?:class|interface|record|enum)\s+([A-Z][A-Za-z0-9_]*)([^{;]*)\{")]
+    private static partial Regex TypeHeader();
+
+    [GeneratedRegex(@"\b(?:extends|implements)\s+([\w.\s,]+?)(?=\b(?:extends|implements|permits)\b|$)")]
+    private static partial Regex SupertypeClause();
+
+    [GeneratedRegex(@"<[^<>]*>")]
+    private static partial Regex GenericArguments();
 
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
     private static partial Regex BlockComment();
