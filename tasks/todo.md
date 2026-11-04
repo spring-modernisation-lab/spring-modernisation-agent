@@ -247,10 +247,22 @@ Design: [`docs/system-design.md`](../docs/system-design.md). The aim is that an 
 
 ### 8.5 Knowledge as data (design §6.2)
 
-- [ ] Move the unsupported libraries (with manual steps), behaviour annotations and settings rules from C# into `Config/knowledge/*.yaml`, validated at start-up (unknown fields fail).
+- [x] Unsupported libraries moved to `Config/knowledge/unsupported-libraries.yaml` (`UnsupportedLibraryCatalog`). It is validated on load: unknown fields, missing required fields, an invalid package and duplicates stop the run, naming the file and the entry. The loaded list is byte-identical to the old hard-coded one; corpus replay is unchanged. A test proves a library added only in YAML is detected, enforced by the guardrail and given manual steps in the PR.
+- [ ] Move the behaviour annotations and settings rules the same way.
 - [ ] `api-notes.yaml`: short, checked notes on moved APIs (HttpClient 4 → 5 pool and TTL methods, Hibernate 6 `UserType`, Security 6 adapter removal), offered to the Remediation Agent by a `get_api_notes(topic)` tool.
 - [ ] Adding an entry needs no code change; a test proves an entry added only in YAML is detected, enforced and rendered in the PR.
 - Verify: corpus replay unchanged after the move; the PR manual steps are byte-identical.
+
+### 8.5b Unsupported libraries derived from data (design §6.3)
+
+The catalogue says what to *do* about a library. Which libraries Boot dropped can be computed rather than remembered.
+
+- [ ] During assessment, compare the managed dependencies in `spring-boot-dependencies` for the source and target Boot versions (2.7.x and 3.5.x), and cache the result per version pair. Libraries Boot stopped managing, such as `net.sf.ehcache`, are **dropped by the platform**.
+- [ ] Flag a repository that depends on a dropped library and does not pin its own version as `F-UNSUPPORTED-LIBRARY`, with source `bom-diff`. Curated catalogue entries keep source `catalogue`.
+- [ ] A dropped library with no catalogue entry still blocks success (`I-UNSUPPORTED-NEVER-SUCCEEDS`). The PR gets generic steps ("choose a supported replacement; Spring Boot 3.5 no longer manages this dependency") and lists it as a **catalogue candidate**. A person then writes the entry once (design §9.4).
+- [ ] The guardrail uses package prefixes for curated entries only: a BOM entry gives Maven coordinates, not Java packages, so derived entries are enforced through the invariant and the PR, not by code scanning.
+- [ ] Limitation, stated in the PR and the docs: the diff only finds libraries Boot *used to* manage. Libraries Boot never managed (Springfox, the Keycloak adapter) still need curated entries.
+- Verify: the 2.7.18 → 3.5.x diff includes `net.sf.ehcache:ehcache`; `orders-service` is flagged from both sources; a test repository depending on another dropped artifact with no catalogue entry is `NeedsDecision` with generic steps.
 
 ### 8.6 Control commands (design §7.1)
 

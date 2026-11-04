@@ -28,6 +28,15 @@ public sealed partial class RemediationPatchApplier
     /// <summary>Larger files must be changed with search-and-replace edits.</summary>
     public const int MaxWholeFileLines = 400;
 
+    private readonly UnsupportedLibraryCatalog _libraries;
+
+    /// <param name="libraries">Defaults to the catalogue shipped with the application.</param>
+    public RemediationPatchApplier(
+        UnsupportedLibraryCatalog? libraries = null)
+    {
+        _libraries = libraries ?? UnsupportedLibraries.Catalog;
+    }
+
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".java", ".kt", ".properties", ".yml", ".yaml"
@@ -83,7 +92,7 @@ public sealed partial class RemediationPatchApplier
     }
 
     /// <summary>Checks every edit and computes the new contents in memory.</summary>
-    private static (Dictionary<string, PendingFile>? Pending, List<AppliedEdit> Edits, string? Rejection) Prepare(
+    private (Dictionary<string, PendingFile>? Pending, List<AppliedEdit> Edits, string? Rejection) Prepare(
         string repositoryPath,
         IReadOnlyList<RemediationEdit> edits)
     {
@@ -169,7 +178,7 @@ public sealed partial class RemediationPatchApplier
     /// files (a sign it special-cases the test to make it pass), and no
     /// behaviour annotations are removed.
     /// </summary>
-    private static string? CheckDesign(
+    private string? CheckDesign(
         string root,
         IReadOnlyDictionary<string, PendingFile> pending)
     {

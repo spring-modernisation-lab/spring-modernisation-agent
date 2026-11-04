@@ -147,6 +147,17 @@ The facts the rules depend on are currently hard-coded in C#: the unsupported-li
 
 Adding knowledge must never need a code change. It's one YAML entry plus one fixture. That makes the system **accretive**: each run's lesson becomes data that every later run uses.
 
+`unsupported-libraries.yaml` is the first file moved (Phase 8.5). The catalogue is validated on load, and a test proves an entry that exists only in YAML is detected, enforced and rendered in the PR.
+
+### 6.3 Derived knowledge
+
+Where the platform publishes the facts, compute them rather than curate them. Spring Boot's BOM (`spring-boot-dependencies`) lists every dependency it manages. Comparing the source and target BOMs shows which libraries Boot dropped, Ehcache 2 among them.
+- **Detection comes from data:** the BOM comparison, plus the curated catalogue for libraries Boot never managed (Springfox, the Keycloak adapter).
+- **Guidance stays curated:** manual steps need a person to write them once.
+- **A dropped library with no catalogue entry still blocks success.** It gets generic steps and becomes a catalogue candidate. Unknown risk is never treated as no risk.
+
+Phase 8.5b in `tasks/todo.md` plans this.
+
 ## 7. The control plane: the driver's interface
 
 Driving the pipeline means starting runs, knowing what each one showed, and checking a change before spending a CI run on it. Today the inputs of a run are not recorded alongside its results, artifacts must be fetched by hand, and the history lives only as narrative in `tasks/demo-traps.md`. The control plane makes each of these one command, with recorded inputs and a compact, stable output.

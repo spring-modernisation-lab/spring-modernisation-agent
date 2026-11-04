@@ -1,0 +1,65 @@
+# Libraries the target platform (Spring Boot 3) no longer supports.
+#
+# One entry per library. Used, all from this file:
+#   - detection: a repository declares one of pomMarkers in a pom.xml, or
+#     imports `package` from src/main code;
+#   - guardrail G-LIB-UNSUPPORTED: AI edits may not add code using `package`;
+#   - invariant I-UNSUPPORTED-NEVER-SUCCEEDS: a repository that still uses one
+#     needs a decision, whatever Maven says;
+#   - the Remediation Agent's prompt (name, package, replacements);
+#   - the draft PR's "Unsupported libraries: manual steps" section
+#     (recommended, manualSteps, alternatives). Text is Markdown.
+#
+# Adding a library needs no code change. The file is validated at start-up:
+# unknown fields, missing required fields, an invalid package name or a
+# duplicate name or package stop the run.
+#
+# Fields: name, package, pomMarkers (1+), replacements, recommended,
+# manualSteps (1+, include the pom.xml change), alternatives (0+).
+
+libraries:
+
+  - name: "Ehcache 2"
+    package: "net.sf.ehcache"
+    pomMarkers:
+      - "<groupId>net.sf.ehcache</groupId>"
+    replacements: "Ehcache 3 through JCache (org.ehcache, javax.cache), Caffeine, or Redis"
+    recommended: "Ehcache 3 through JCache: keeps XML-configured caches and their limits"
+    manualSteps:
+      - "`pom.xml`: replace `net.sf.ehcache:ehcache` with `org.ehcache:ehcache` (classifier `jakarta`) and add `javax.cache:cache-api`; Spring Boot manages both versions."
+      - "Convert every Ehcache 2 XML file, in main **and test** resources, to the Ehcache 3 format. Carry over each cache's name, time-to-live or time-to-idle, and size limit."
+      - "Settings: change `spring.cache.type: ehcache` to `jcache`, and replace `spring.cache.ehcache.config` with `spring.cache.jcache.config` pointing at the converted file, in every profile and test configuration."
+      - "Keep the Spring caching annotations (`@Cacheable` and others) as they are; remove any code that uses the Ehcache 2 API directly."
+      - "Run the caching tests and check expiry and size limits behave as before."
+    alternatives:
+      - "Caffeine: in-process like Ehcache, configured with a spec string per cache instead of XML (`spring.cache.type: caffeine`); no per-cache size limits without a custom bean."
+      - "Redis: one cache shared by every instance; needs a Redis server, network calls and serialisable values."
+
+  - name: "Keycloak Spring adapter"
+    package: "org.keycloak.adapters"
+    pomMarkers:
+      - "keycloak-spring-boot"
+      - "keycloak-spring-security-adapter"
+    replacements: "Spring Security's OAuth2 resource server or OAuth2 login"
+    recommended: "Spring Security OAuth2 resource server (APIs) or OAuth2 login (browser applications)"
+    manualSteps:
+      - "`pom.xml`: remove the Keycloak adapter dependencies and BOM; add `spring-boot-starter-oauth2-resource-server` (or `spring-boot-starter-oauth2-client` for login)."
+      - "Settings: replace the `keycloak.*` properties with `spring.security.oauth2.resourceserver.jwt.issuer-uri` set to the realm URL (or a client registration for login)."
+      - "Replace the Keycloak security configuration class with a `SecurityFilterChain` bean, and map realm and client roles to authorities with a `JwtAuthenticationConverter`, keeping every role check."
+      - "Replace `KeycloakPrincipal` and `KeycloakSecurityContext` with `Jwt` or `OAuth2User`."
+      - "Update tests to use spring-security-test's `jwt()` or `oidcLogin()`."
+    alternatives:
+      - "None in practice: Keycloak itself has deprecated the adapters."
+
+  - name: "Springfox"
+    package: "springfox.documentation"
+    pomMarkers:
+      - "<groupId>io.springfox</groupId>"
+    replacements: "springdoc-openapi"
+    recommended: "springdoc-openapi 2.x"
+    manualSteps:
+      - "`pom.xml`: remove the `io.springfox` dependencies and add `org.springdoc:springdoc-openapi-starter-webmvc-ui` (2.x)."
+      - "Remove `@EnableSwagger2` and `Docket` beans; express grouping and path filters with `GroupedOpenApi` beans and `springdoc.*` settings."
+      - "Replace Swagger 2 annotations (`@Api`, `@ApiOperation`, `@ApiParam`, `@ApiModel`) with OpenAPI 3 ones (`@Tag`, `@Operation`, `@Parameter`, `@Schema`)."
+      - "The documentation URLs change (`/swagger-ui.html` to `/swagger-ui/index.html`, `/v2/api-docs` to `/v3/api-docs`): update security rules, gateways and links."
+    alternatives: []

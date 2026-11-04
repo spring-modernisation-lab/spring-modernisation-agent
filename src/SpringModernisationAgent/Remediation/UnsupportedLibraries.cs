@@ -1,3 +1,8 @@
+using System.Text.RegularExpressions;
+using YamlDotNet.Core;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
+
 namespace SpringModernisationAgent.Remediation;
 
 /// <summary>A library the target platform no longer supports, and what a person does about it.</summary>
@@ -18,90 +23,107 @@ public sealed record UnsupportedLibrary(
     IReadOnlyList<string> Alternatives);
 
 /// <summary>
-/// Libraries Spring Boot 3 dropped. Replacing one is a design decision that
-/// also touches <c>pom.xml</c> and often test resources, so the Remediation
-/// Agent may not write code against them (the applier rejects it), is told
-/// which ones a repository uses, and the pull request lists the manual steps.
+/// The libraries in <c>Config/knowledge/unsupported-libraries.yaml</c>.
+/// Replacing one is a design decision that also touches <c>pom.xml</c> and
+/// often test resources, so the Remediation Agent may not write code against
+/// them, is told which ones a repository uses, and the pull request lists the
+/// manual steps. Adding a library is a YAML entry, never a code change.
 /// </summary>
-public static class UnsupportedLibraries
+public sealed partial class UnsupportedLibraryCatalog
 {
-    public static IReadOnlyList<UnsupportedLibrary> All { get; } =
-    [
-        new(
-            Name: "Ehcache 2",
-            Package: "net.sf.ehcache",
-            PomMarkers: ["<groupId>net.sf.ehcache</groupId>"],
-            Replacements: "Ehcache 3 through JCache (org.ehcache, javax.cache), Caffeine, or Redis",
-            Recommended: "Ehcache 3 through JCache: keeps XML-configured caches and their limits",
-            ManualSteps:
-            [
-                "`pom.xml`: replace `net.sf.ehcache:ehcache` with `org.ehcache:ehcache` (classifier `jakarta`) " +
-                "and add `javax.cache:cache-api`; Spring Boot manages both versions.",
-                "Convert every Ehcache 2 XML file, in main **and test** resources, to the Ehcache 3 format. " +
-                "Carry over each cache's name, time-to-live or time-to-idle, and size limit.",
-                "Settings: change `spring.cache.type: ehcache` to `jcache`, and replace `spring.cache.ehcache.config` " +
-                "with `spring.cache.jcache.config` pointing at the converted file, in every profile and test configuration.",
-                "Keep the Spring caching annotations (`@Cacheable` and others) as they are; remove any code that " +
-                "uses the Ehcache 2 API directly.",
-                "Run the caching tests and check expiry and size limits behave as before."
-            ],
-            Alternatives:
-            [
-                "Caffeine: in-process like Ehcache, configured with a spec string per cache instead of XML " +
-                "(`spring.cache.type: caffeine`); no per-cache size limits without a custom bean.",
-                "Redis: one cache shared by every instance; needs a Redis server, network calls and serialisable values."
-            ]),
-        new(
-            Name: "Keycloak Spring adapter",
-            Package: "org.keycloak.adapters",
-            PomMarkers: ["keycloak-spring-boot", "keycloak-spring-security-adapter"],
-            Replacements: "Spring Security's OAuth2 resource server or OAuth2 login",
-            Recommended: "Spring Security OAuth2 resource server (APIs) or OAuth2 login (browser applications)",
-            ManualSteps:
-            [
-                "`pom.xml`: remove the Keycloak adapter dependencies and BOM; add `spring-boot-starter-oauth2-resource-server` " +
-                "(or `spring-boot-starter-oauth2-client` for login).",
-                "Settings: replace the `keycloak.*` properties with `spring.security.oauth2.resourceserver.jwt.issuer-uri` " +
-                "set to the realm URL (or a client registration for login).",
-                "Replace the Keycloak security configuration class with a `SecurityFilterChain` bean, and map realm and " +
-                "client roles to authorities with a `JwtAuthenticationConverter`, keeping every role check.",
-                "Replace `KeycloakPrincipal` and `KeycloakSecurityContext` with `Jwt` or `OAuth2User`.",
-                "Update tests to use spring-security-test's `jwt()` or `oidcLogin()`."
-            ],
-            Alternatives:
-            [
-                "None in practice: Keycloak itself has deprecated the adapters."
-            ]),
-        new(
-            Name: "Springfox",
-            Package: "springfox.documentation",
-            PomMarkers: ["<groupId>io.springfox</groupId>"],
-            Replacements: "springdoc-openapi",
-            Recommended: "springdoc-openapi 2.x",
-            ManualSteps:
-            [
-                "`pom.xml`: remove the `io.springfox` dependencies and add `org.springdoc:springdoc-openapi-starter-webmvc-ui` (2.x).",
-                "Remove `@EnableSwagger2` and `Docket` beans; express grouping and path filters with `GroupedOpenApi` " +
-                "beans and `springdoc.*` settings.",
-                "Replace Swagger 2 annotations (`@Api`, `@ApiOperation`, `@ApiParam`, `@ApiModel`) with OpenAPI 3 ones " +
-                "(`@Tag`, `@Operation`, `@Parameter`, `@Schema`).",
-                "The documentation URLs change (`/swagger-ui.html` to `/swagger-ui/index.html`, `/v2/api-docs` to " +
-                "`/v3/api-docs`): update security rules, gateways and links."
-            ],
-            Alternatives: [])
-    ];
+    public const string DefaultRelativePath = "Config/knowledge/unsupported-libraries.yaml";
 
-    public static UnsupportedLibrary? Find(
+    public UnsupportedLibraryCatalog(
+        IReadOnlyList<UnsupportedLibrary> libraries)
+    {
+        ArgumentNullException.ThrowIfNull(libraries);
+
+        All = libraries;
+    }
+
+    public IReadOnlyList<UnsupportedLibrary> All { get; }
+
+    /// <summary>Reads and validates a catalogue file; any problem stops the run with the file and entry named.</summary>
+    public static UnsupportedLibraryCatalog Load(
+        string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException("The unsupported-libraries catalogue was not found.", path);
+        }
+
+        return Parse(File.ReadAllText(path), path);
+    }
+
+    public static UnsupportedLibraryCatalog Parse(
+        string yaml,
+        string source = "unsupported-libraries.yaml")
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        // Unknown fields fail: a misspelt field must not silently switch a rule off.
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+
+        CatalogueFile? file;
+
+        try
+        {
+            file = deserializer.Deserialize<CatalogueFile>(yaml);
+        }
+        catch (YamlException exception)
+        {
+            throw new InvalidOperationException(
+                $"{source}: {exception.Message} (line {exception.Start.Line}).", exception);
+        }
+
+        var entries = file?.Libraries ?? [];
+        var libraries = new List<UnsupportedLibrary>();
+
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var entry = entries[index];
+            var label = $"{source}: library {index + 1} ('{entry.Name ?? "?"}')";
+
+            Require(!string.IsNullOrWhiteSpace(entry.Name), label, "needs a name");
+            Require(entry.Package is not null && PackageName().IsMatch(entry.Package), label,
+                "needs a package such as 'net.sf.ehcache'");
+            Require(entry.PomMarkers is { Count: > 0 } && entry.PomMarkers.All(marker => !string.IsNullOrWhiteSpace(marker)),
+                label, "needs at least one pomMarkers entry");
+            Require(!string.IsNullOrWhiteSpace(entry.Replacements), label, "needs replacements");
+            Require(!string.IsNullOrWhiteSpace(entry.Recommended), label, "needs recommended");
+            Require(entry.ManualSteps is { Count: > 0 } && entry.ManualSteps.All(step => !string.IsNullOrWhiteSpace(step)),
+                label, "needs at least one manualSteps entry");
+            Require(libraries.All(library => library.Name != entry.Name), label, "duplicates another library's name");
+            Require(libraries.All(library => library.Package != entry.Package), label, "duplicates another library's package");
+
+            libraries.Add(new UnsupportedLibrary(
+                entry.Name!,
+                entry.Package!,
+                entry.PomMarkers!,
+                entry.Replacements!,
+                entry.Recommended!,
+                entry.ManualSteps!,
+                entry.Alternatives ?? []));
+        }
+
+        return new UnsupportedLibraryCatalog(libraries);
+    }
+
+    public UnsupportedLibrary? Find(
         string name) =>
         All.FirstOrDefault(library => library.Name == name);
 
-    /// <summary>The unsupported libraries a repository declares or imports, in list order.</summary>
-    public static IReadOnlyList<UnsupportedLibrary> FindIn(
+    /// <summary>The libraries a repository declares or imports, in catalogue order.</summary>
+    public IReadOnlyList<UnsupportedLibrary> FindIn(
         string repositoryPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
 
-        if (!Directory.Exists(repositoryPath))
+        if (!Directory.Exists(repositoryPath) || All.Count == 0)
         {
             return [];
         }
@@ -148,4 +170,67 @@ public static class UnsupportedLibraries
 
         return All.Where(found.Contains).ToList();
     }
+
+    private static void Require(
+        bool valid,
+        string label,
+        string problem)
+    {
+        if (!valid)
+        {
+            throw new InvalidOperationException($"{label} {problem}.");
+        }
+    }
+
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")]
+    private static partial Regex PackageName();
+
+    private sealed class CatalogueFile
+    {
+        public List<CatalogueEntry>? Libraries { get; set; }
+    }
+
+    private sealed class CatalogueEntry
+    {
+        public string? Name { get; set; }
+
+        public string? Package { get; set; }
+
+        public List<string>? PomMarkers { get; set; }
+
+        public string? Replacements { get; set; }
+
+        public string? Recommended { get; set; }
+
+        public List<string>? ManualSteps { get; set; }
+
+        public List<string>? Alternatives { get; set; }
+    }
+}
+
+/// <summary>
+/// The catalogue shipped with the application
+/// (<see cref="UnsupportedLibraryCatalog.DefaultRelativePath"/> under the
+/// application directory), loaded on first use. A missing or invalid file
+/// fails every use with the same clear error, rather than running without
+/// the rules.
+/// </summary>
+public static class UnsupportedLibraries
+{
+    private static readonly Lazy<UnsupportedLibraryCatalog> Default = new(
+        () => UnsupportedLibraryCatalog.Load(
+            Path.Combine(AppContext.BaseDirectory, UnsupportedLibraryCatalog.DefaultRelativePath)),
+        LazyThreadSafetyMode.PublicationOnly);
+
+    public static UnsupportedLibraryCatalog Catalog => Default.Value;
+
+    public static IReadOnlyList<UnsupportedLibrary> All => Catalog.All;
+
+    public static UnsupportedLibrary? Find(
+        string name) =>
+        Catalog.Find(name);
+
+    public static IReadOnlyList<UnsupportedLibrary> FindIn(
+        string repositoryPath) =>
+        Catalog.FindIn(repositoryPath);
 }

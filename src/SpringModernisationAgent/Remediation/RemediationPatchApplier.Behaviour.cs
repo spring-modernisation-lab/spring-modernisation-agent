@@ -26,12 +26,12 @@ public sealed partial class RemediationPatchApplier
         "Validated", "Valid", "Retryable"
     ];
 
-    private static string? CheckUnsupportedLibraries(
+    private string? CheckUnsupportedLibraries(
         string relativePath,
         string strippedBefore,
         string strippedAfter)
     {
-        foreach (var library in UnsupportedLibraries.All)
+        foreach (var library in _libraries.All)
         {
             var marker = library.Package + ".";
 

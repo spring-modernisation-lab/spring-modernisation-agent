@@ -37,8 +37,11 @@ public static class PullRequestContentBuilder
         TransformationPlan plan,
         TransformationExecutionResult result,
         IReadOnlyList<ReviewFlag> flags,
-        MigrationAnalysis? analysis)
+        MigrationAnalysis? analysis,
+        UnsupportedLibraryCatalog? libraries = null)
     {
+        libraries ??= UnsupportedLibraries.Catalog;
+
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(flags);
@@ -69,10 +72,10 @@ public static class PullRequestContentBuilder
 
         if (needsDecision)
         {
-            AppendDecision(body, result);
+            AppendDecision(body, result, libraries);
         }
 
-        AppendUnsupportedLibraries(body, result);
+        AppendUnsupportedLibraries(body, result, libraries);
         AppendOutcome(body, result);
         AppendFlags(body, flags);
         AppendChanges(body, result);
@@ -102,7 +105,8 @@ public static class PullRequestContentBuilder
 
     private static void AppendDecision(
         StringBuilder body,
-        TransformationExecutionResult result)
+        TransformationExecutionResult result,
+        UnsupportedLibraryCatalog libraries)
     {
         var agentAsked = result.Remediation?.Outcome == RemediationOutcome.NeedsHumanDecision;
         var proposal = agentAsked ? result.Remediation!.Attempts.LastOrDefault()?.Proposal : null;
@@ -116,7 +120,7 @@ public static class PullRequestContentBuilder
         }
 
         var known = result.UnsupportedLibraries
-            .Select(UnsupportedLibraries.Find)
+            .Select(libraries.Find)
             .OfType<UnsupportedLibrary>()
             .Select(library => library.Name)
             .ToList();
@@ -161,17 +165,18 @@ public static class PullRequestContentBuilder
         body.AppendLine();
     }
 
-    /// <summary>Fixed guidance from <see cref="UnsupportedLibraries"/>: the same steps every run.</summary>
+    /// <summary>Fixed guidance from the unsupported-libraries catalogue: the same steps every run.</summary>
     private static void AppendUnsupportedLibraries(
         StringBuilder body,
-        TransformationExecutionResult result)
+        TransformationExecutionResult result,
+        UnsupportedLibraryCatalog libraries)
     {
-        var libraries = result.UnsupportedLibraries
-            .Select(UnsupportedLibraries.Find)
+        var found = result.UnsupportedLibraries
+            .Select(libraries.Find)
             .OfType<UnsupportedLibrary>()
             .ToList();
 
-        if (libraries.Count == 0)
+        if (found.Count == 0)
         {
             return;
         }
@@ -183,7 +188,7 @@ public static class PullRequestContentBuilder
             "resources, which the pipeline never lets the AI edit, so a person makes these changes on this branch. " +
             "This guidance is fixed text from the pipeline, not AI-generated.");
 
-        foreach (var library in libraries)
+        foreach (var library in found)
         {
             body.AppendLine();
             body.AppendLine($"### {library.Name} (`{library.Package}`)");

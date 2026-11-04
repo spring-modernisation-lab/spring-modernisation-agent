@@ -58,3 +58,5 @@ The planned control-plane commands (`run start`, `run status`, `run fetch`, `dig
 | `MIGRATION_PUBLISH_PULL_REQUESTS`, `GITHUB_TOKEN`, `GITHUB_ORGANISATION`, `MIGRATION_WORKSPACE_ROOT` | `publish` | Draft PR publishing |
 
 Routes, recipes and validation checks per repository kind: `src/SpringModernisationAgent/Config/spring.yaml`.
+
+Libraries Spring Boot 3 dropped, with their manual steps: `src/SpringModernisationAgent/Config/knowledge/unsupported-libraries.yaml`. Adding a library is one entry, with no code change; the file's header lists the fields and how each is used.
