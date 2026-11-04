@@ -11,7 +11,7 @@ namespace SpringModernisationAgent.Transformation;
 /// id, and <c>git diff --binary</c> between the base revision and that tree
 /// is written straight to a file by git, so the patch is byte-exact.
 /// </summary>
-public sealed partial class GitWorkspacePatchRecorder : IWorkspacePatchRecorder
+public sealed partial class GitWorkspacePatchRecorder : IWorkspacePatchRecorder, IWorkspaceRestorer
 {
     private readonly IGitProcessRunner _gitProcessRunner;
     private readonly string _artifactsDirectory;
@@ -100,6 +100,69 @@ public sealed partial class GitWorkspacePatchRecorder : IWorkspacePatchRecorder
                 Sha256: sha256,
                 ChangedFiles: changedFiles),
             patchPath);
+    }
+
+    public async Task RestoreAsync(
+        string repositoryPath,
+        string treeId,
+        IReadOnlyList<string> files,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(treeId);
+        ArgumentNullException.ThrowIfNull(files);
+
+        var root = Path.GetFullPath(repositoryPath);
+        var inTree = new List<string>();
+
+        foreach (var file in files)
+        {
+            var fullPath = InsideRepository(root, file);
+
+            // Exit code 0: the tree has this path.
+            var exists = await _gitProcessRunner.RunAsync(
+                repositoryPath,
+                ["cat-file", "-e", $"{treeId}:{file}"],
+                cancellationToken);
+
+            if (exists.ExitCode == 0)
+            {
+                inTree.Add(file);
+            }
+            else if (File.Exists(fullPath))
+            {
+                File.Delete(fullPath);
+            }
+        }
+
+        if (inTree.Count > 0)
+        {
+            await RunAsync(
+                repositoryPath,
+                ["checkout", treeId, "--", .. inTree],
+                "Git could not restore the files.",
+                cancellationToken);
+        }
+    }
+
+    /// <summary>A repository-relative path, refused if it is absolute or leaves the repository.</summary>
+    private static string InsideRepository(
+        string root,
+        string file)
+    {
+        if (string.IsNullOrWhiteSpace(file) || Path.IsPathRooted(file) || file.Contains(':'))
+        {
+            throw new ArgumentException($"'{file}' is not a repository-relative path.", nameof(file));
+        }
+
+        var fullPath = Path.GetFullPath(Path.Combine(root, file));
+
+        if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"'{file}' is outside the repository.", nameof(file));
+        }
+
+        return fullPath;
     }
 
     private async Task<string> RunAsync(

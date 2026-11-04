@@ -253,6 +253,40 @@ public class GitWorkspacePatchRecorderTests : IDisposable
                 "01-openrewrite"));
     }
 
+    [Fact]
+    public async Task RestoreAsync_PutsOnlyTheNamedFilesBackAsTheyWereInTheTree()
+    {
+        // A reverted port: its files go back to the task's base tree, nothing else moves.
+        var baseCommit = await CreateRepositoryAsync();
+        Directory.CreateDirectory(Path.Combine(RepositoryPath, "src"));
+        await File.WriteAllTextAsync(Path.Combine(RepositoryPath, "src", "Port.java"), "class Port { /* recipes */ }\n");
+        await File.WriteAllTextAsync(Path.Combine(RepositoryPath, "src", "Other.java"), "class Other {}\n");
+        var taskBase = await CreateRecorder().RecordAsync(RepositoryPath, "orders-service", baseCommit, "01-openrewrite");
+
+        await File.WriteAllTextAsync(Path.Combine(RepositoryPath, "src", "Port.java"), "class Port { /* AI */ }\n");
+        await File.WriteAllTextAsync(Path.Combine(RepositoryPath, "src", "New.java"), "class New {}\n");
+        await File.WriteAllTextAsync(Path.Combine(RepositoryPath, "src", "Other.java"), "class Other { /* another task */ }\n");
+
+        await CreateRecorder().RestoreAsync(RepositoryPath, taskBase.TreeId, ["src/Port.java", "src/New.java"]);
+
+        Assert.Equal("class Port { /* recipes */ }\n", await File.ReadAllTextAsync(Path.Combine(RepositoryPath, "src", "Port.java")));
+        Assert.False(File.Exists(Path.Combine(RepositoryPath, "src", "New.java")));
+        Assert.Equal("class Other { /* another task */ }\n", await File.ReadAllTextAsync(Path.Combine(RepositoryPath, "src", "Other.java")));
+    }
+
+    [Theory]
+    [InlineData("../outside.txt")]
+    [InlineData("/etc/passwd")]
+    [InlineData("C:/x.txt")]
+    public async Task RestoreAsync_APathOutsideTheRepositoryIsRefused(
+        string path)
+    {
+        var baseCommit = await CreateRepositoryAsync();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => CreateRecorder().RestoreAsync(RepositoryPath, baseCommit, [path]));
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_root))

@@ -24,6 +24,21 @@ public interface IWorkspacePatchRecorder
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Puts files back as they were in an earlier snapshot: how a rejected port
+/// is reverted to its task's base tree (docs/system-design.md §4.1).
+/// </summary>
+public interface IWorkspaceRestorer
+{
+    /// <param name="treeId">A tree id from <see cref="RecordedPatch.TreeId"/>.</param>
+    /// <param name="files">Repository-relative paths. Each is restored as it was in the tree, or deleted if the tree did not have it. No other file changes.</param>
+    Task RestoreAsync(
+        string repositoryPath,
+        string treeId,
+        IReadOnlyList<string> files,
+        CancellationToken cancellationToken = default);
+}
+
 /// <param name="TreeId">The git tree id of the workspace snapshot.</param>
 /// <param name="Artifact">The patch written for this stage.</param>
 /// <param name="FullPath">Where the patch file was written.</param>
