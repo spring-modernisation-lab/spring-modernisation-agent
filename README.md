@@ -17,6 +17,65 @@ AI-assisted migration of a Spring estate from Spring Boot 2.7 / Java 11 to Sprin
 
 ## How it works
 
+Purple boxes are where the AI is involved; everything else is deterministic. The AI never decides an outcome: it proposes, and guardrails, Maven and the behaviour contract decide.
+
+```mermaid
+flowchart TD
+    subgraph ASSESS["1 · Assess the estate"]
+        A1["Scan repositories<br/>kind, Boot and Java versions, libraries"]
+        A2["Dependency graph and waves<br/>parents and libraries first"]
+        A3["Check each baseline builds"]
+        A4["🤖 AI writes the strategy document<br/>explains the facts, decides nothing"]
+        A1 --> A2 --> A3 --> A4
+    end
+
+    subgraph TRANSFORM["2 · Transform one repository (each repository in the wave)"]
+        T1["Clone at the assessed commit"]
+        T2["Record the behaviour contract<br/>on Boot 2.7 / Java 11:<br/>context starts, endpoint × role → status,<br/>settings, HTTP client and cache values"]
+        T3["OpenRewrite recipes<br/>Boot 3.5, Java 21, lab recipes"]
+        T4{"Maven validates<br/>compile and tests"}
+        T5["Classify what is left, from facts<br/>mechanical · API move · platform dropped ·<br/>contract · knock-on"]
+        T6["Recipe discovery<br/>matches indexed recipes, measures them<br/>on a throwaway copy: suggestions only"]
+        T7["🤖 AI Remediation Agent<br/>read-only tools, previews its edits,<br/>proposes edits or asks for a decision"]
+        T8{"Guardrails<br/>no new types, no test edits,<br/>no dropped annotations or settings,<br/>no unsupported libraries"}
+        T9["Compare behaviour<br/>on Boot 3.5 / Java 21"]
+        T1 --> T2 --> T3 --> T4
+        T4 -- "fails" --> T5 --> T6 --> T7 --> T8
+        T8 -- "rejected" --> T7
+        T8 -- "applied" --> T4
+        T4 -- "passes, or attempts used up" --> T9
+    end
+
+    subgraph VERDICT["3 · Verdict, from facts only"]
+        V{"Maven passed and<br/>behaviour unchanged and<br/>no unsupported library?"}
+        V1["✅ Succeeded"]
+        V2["⚠️ Needs decision"]
+        V3["❌ Failed"]
+        V -- "yes" --> V1
+        V -- "Maven passed, but behaviour changed<br/>or a library was dropped" --> V2
+        V -- "Maven failed" --> V3
+    end
+
+    subgraph HANDOVER["4 · Hand over"]
+        H1["Job summary and results document<br/>🤖 AI analysis, labelled as such"]
+        H2["Draft pull request<br/>patches per stage, behaviour differences,<br/>manual steps, recipe suggestions"]
+        H3["👤 A person reviews, decides and merges"]
+        H1 --> H2 --> H3
+    end
+
+    A4 --> T1
+    T9 --> V
+    V1 --> H1
+    V2 --> H1
+    V3 --> H1
+    V1 -. "opens the next wave" .-> T1
+
+    classDef ai fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92
+    classDef person fill:#fff8e1,stroke:#f9a825,color:#5d4037
+    class A4,T7,H1 ai
+    class H3 person
+```
+
 | Step | What happens | Who decides |
 |---|---|---|
 | **Assess** (`assess`) | Scans the estate, works out dependencies and waves, and checks the baseline builds. The AI writes the strategy document. | Deterministic rules; the AI only explains |

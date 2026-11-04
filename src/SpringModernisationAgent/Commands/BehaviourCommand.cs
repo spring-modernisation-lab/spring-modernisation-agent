@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using SpringModernisationAgent.Behaviour;
 using SpringModernisationAgent.Build;
+using SpringModernisationAgent.Reporting;
 
 namespace SpringModernisationAgent.Commands;
 
@@ -77,7 +78,8 @@ public sealed class BehaviourCommand
         markdown.AppendLine(
             comparison.Matches
                 ? $"**Holds.** {comparison.Same} recorded behaviours are unchanged."
-                : $"**Does not hold.** {comparison.Differences.Count} differ from the baseline; {comparison.Same} are unchanged.");
+                : $"**Does not hold.** {comparison.Differences.Count} differ from the baseline; {comparison.Same} are unchanged." +
+                  BehaviourText.UncheckedSentence(comparison));
 
         if (comparison.Differences.Count > 0)
         {
@@ -89,7 +91,7 @@ public sealed class BehaviourCommand
             {
                 markdown.AppendLine(
                     $"| `{Cell(difference.Item)}` | {Cell(difference.Before)} | {Cell(difference.After ?? "(not recorded)")} | " +
-                    $"{difference.Status}{(difference.Decision is null ? "" : $" ({difference.Decision})")} |");
+                    $"{Cell(BehaviourText.Status(difference))} |");
             }
         }
 

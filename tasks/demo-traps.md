@@ -86,6 +86,12 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
   - AI fixes made durable as recipes and mappings.
 
   Plan: `tasks/todo.md` Phase 8.
+- **Run 26** (`edb274f`, the first run with the behaviour contract in the pipeline): **orders-service `Needs decision`, contract does not hold.** platform-parent `Succeeded`.
+  - The fix loop still works: attempt 1 ported T1, T2 and T4 and they compile. Attempt 2 was NeedsHumanDecision carrying `spring.mvc.pathmatch.matching-strategy: ANT_PATH_MATCHER` to bring back trailing slashes (T5). That doesn't work on Spring 6, and the unit tests still failed.
+  - **The contract caught what Maven can't:** the HttpClient TTL dropped **for the third time** (R14, R24, R26; the pool sizes moved to `PoolingHttpClientConnectionManager`, the TTL vanished). It also caught `/api/orders/` returning 404 for VIEWER and OPERATOR, and the production profile no longer starting (`cacheManager`, Ehcache 2).
+  - The failed production context first showed as 36 separate "unavailable" rows; they are now folded under its context row.
+  - Not covered by the contract: the H2 console went from ignored by security to `permitAll` with frame options off. It isn't a Spring MVC endpoint, so nothing records it.
+  - Takeaway for 8.4: a port of T4 that carries the obligation "`connectionTimeToLive` stays 30000ms" would have been reverted and repaired, not accepted.
 
 Demo talking point: *Maven decided the build is green; review found two behaviour changes the tests do not cover. That is why the output is a draft PR with a reviewer summary, not a merge.*
 

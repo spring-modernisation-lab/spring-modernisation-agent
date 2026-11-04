@@ -73,4 +73,46 @@ public class BehaviourContractTests
         Assert.Equal(ContractItemStatus.Allowed, difference.Status);
         Assert.Equal("D-orders-service-1", difference.Decision);
     }
+
+    [Fact]
+    public void Compare_AProfileThatNoLongerStarts_IsOneDifferenceCarryingWhatItHides()
+    {
+        // R26: production no longer starts (Ehcache 2), so none of its behaviours can be read.
+        var baseline = Record(
+            ("B-CTX-production", "starts"),
+            ("B-SEC-production-GET /api/orders-VIEWER", "200"),
+            ("B-CACHE-production-inventoryAvailability.timeToLive", "30000ms"),
+            ("B-CTX-default", "starts"),
+            ("B-BEAN-default-HttpClient.connectionTimeToLive", "30000ms"));
+        var after = Record(
+            ("B-CTX-production", "fails: NoSuchBeanDefinitionException: cacheManager"),
+            ("B-CTX-default", "starts"),
+            ("B-BEAN-default-HttpClient.connectionTimeToLive", BehaviourRecord.Unavailable));
+
+        var comparison = BehaviourContract.Compare(baseline, after);
+
+        Assert.False(comparison.Matches);
+        Assert.Equal(
+            ["B-BEAN-default-HttpClient.connectionTimeToLive", "B-CTX-production"],
+            comparison.Differences.Select(difference => difference.Item));
+        var context = comparison.Differences.Single(difference => difference.Item == "B-CTX-production");
+        Assert.Equal(
+            ["B-CACHE-production-inventoryAvailability.timeToLive", "B-SEC-production-GET /api/orders-VIEWER"],
+            context.Unchecked);
+        Assert.Equal(2, comparison.Unchecked);
+        Assert.Equal(1, comparison.Same);
+    }
+
+    [Fact]
+    public void Compare_AProfileThatNoLongerStarts_StillReportsValuesThatChanged()
+    {
+        // Only unreadable items are folded in; a different value is its own difference.
+        var baseline = Record(("B-CTX-production", "starts"), ("B-CFG-production-server.port", "8080"));
+        var after = Record(("B-CTX-production", "fails: x"), ("B-CFG-production-server.port", "9090"));
+
+        var comparison = BehaviourContract.Compare(baseline, after);
+
+        Assert.Equal(2, comparison.Differences.Count);
+        Assert.Equal(0, comparison.Unchecked);
+    }
 }

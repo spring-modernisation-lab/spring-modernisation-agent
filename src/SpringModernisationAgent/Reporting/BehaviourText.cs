@@ -23,7 +23,33 @@ public static class BehaviourText
         return comparison.Matches
             ? $"**Holds**: {comparison.Same} recorded behaviours are unchanged" +
               (comparison.Differences.Count > 0 ? $"; {comparison.Differences.Count} differences are allowed by decisions." : ".")
-            : $"**Does not hold**: {comparison.Differences.Count} differ from the Boot 2.7 application; {comparison.Same} are unchanged.";
+            : $"**Does not hold**: {comparison.Differences.Count} differ from the Boot 2.7 application; {comparison.Same} are unchanged." +
+              UncheckedSentence(comparison);
+    }
+
+    /// <summary>" N more could not be checked …", or empty when every item was read.</summary>
+    public static string UncheckedSentence(
+        ContractComparison comparison)
+    {
+        ArgumentNullException.ThrowIfNull(comparison);
+
+        return comparison.Unchecked == 0
+            ? string.Empty
+            : $" {comparison.Unchecked} more could not be checked because an application no longer starts; " +
+              "they are counted under its context row, not as separate differences.";
+    }
+
+    /// <summary>The status cell: the status, the allowing decision, and what a stopped context hides.</summary>
+    public static string Status(
+        ContractDifference difference)
+    {
+        ArgumentNullException.ThrowIfNull(difference);
+
+        return difference.Status +
+               (difference.Decision is null ? "" : $" ({difference.Decision})") +
+               (difference.Unchecked is { Count: > 0 } hidden
+                   ? $" ({hidden.Count} behaviours of this profile could not be checked)"
+                   : "");
     }
 
     /// <summary>The differences as a Markdown table (empty when there are none).</summary>
@@ -45,7 +71,7 @@ public static class BehaviourText
         {
             markdown.AppendLine(
                 $"| `{Cell(difference.Item)}` | {Cell(difference.Before)} | {Cell(difference.After ?? "(not recorded)")} | " +
-                $"{difference.Status}{(difference.Decision is null ? "" : $" ({difference.Decision})")} |");
+                $"{Cell(Status(difference))} |");
         }
 
         return markdown.ToString();

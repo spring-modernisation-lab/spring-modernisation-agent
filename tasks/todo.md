@@ -347,7 +347,7 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 
   Needs a JDK, so it runs in a probe workflow, not locally.
 
-**8.2 progress (steps 1–3 done; step 4, pipeline integration, next):**
+**8.2 progress (done; confirmed in CI by run 26):**
 - [x] **Contract model and comparison** (`BehaviourContract`): same, changed, unavailable (unknown is not "same") or allowed by a decision.
 - [x] **Probe** (`BehaviourProbe`, `Config/probe/BehaviourProbe.java.template`, `Config/knowledge/behaviour-probes.yaml`):
   - discovers the application package, profiles, settings keys and roles from the repository;
@@ -369,7 +369,8 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
   - the job summary has a "behaviour contract" section with a differences table;
   - the PR has "Behaviour compared with the Boot 2.7 application", and the decision section explains when Maven passed but the behaviour changed.
 - [x] Workflow input `behaviour-contract` (on by default) and a Java 11 setup in the transform job. 11 tests (recorder, verdict, reporting, coordinator ordering). 644 pass.
-- [ ] Confirm in CI with a transform run with remediation **on**, so the migrated code compiles and the comparison runs end to end.
+- [x] **Confirmed in CI, run 26** (`edb274f`, remediation on): the baseline was recorded on Java 11 and the comparison ran on Java 21 after remediation. orders-service is **Needs decision** with the contract not holding. It caught the dropped TTL again (a loss Maven can't see), the trailing-slash paths now returning 404 (T5), and production no longer starting (Ehcache, T6).
+- [x] **A context that no longer starts is one difference, not dozens** (from run 26). When a profile started on the baseline and doesn't now, its unreadable items are folded into the `B-CTX-…` row (`ContractDifference.Unchecked`). The reports say how many couldn't be checked. Values that were read and differ are still listed, and the verdict is unchanged. Run 26 re-compared: 42 rows → 6 (the TTL, the context with 36 unchecked under it, four trailing-slash 404s). 646 pass.
 - [ ] Later: probes for other repository kinds (a library with Spring configuration via a generated test application; parent POMs via the effective POM; plain libraries via characterisation tests). See design §3.
 
 ### 8.3 Problem kinds and knowledge (design §4, §9.2) *(no CI)*

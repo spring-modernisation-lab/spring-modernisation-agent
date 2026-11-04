@@ -158,7 +158,8 @@ public static class PullRequestContentBuilder
                 result.Behaviour.Comparison is null
                     ? $"Maven passed, but the behaviour contract could not be checked ({result.Behaviour.Note}). A person must confirm the behaviour is unchanged."
                     : $"Maven passed, but the migrated application behaves differently from the Boot 2.7 one in {result.Behaviour.Comparison.Differences.Count} " +
-                      "ways (see **Behaviour compared with the Boot 2.7 application**). Fix each difference or accept it with a decision.");
+                      "ways (see **Behaviour compared with the Boot 2.7 application**)." + BehaviourText.UncheckedSentence(result.Behaviour.Comparison) +
+                      " Fix each difference or accept it with a decision.");
         }
 
         if (proposal is not null)

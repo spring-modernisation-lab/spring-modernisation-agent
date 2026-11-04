@@ -137,7 +137,8 @@ public sealed class BehaviourContractRecorder : IBehaviourContractRecorder
                 plan.RepositoryName,
                 comparison.Matches
                     ? $"behaviour contract holds ({comparison.Same} behaviours unchanged)"
-                    : $"behaviour contract does not hold: {comparison.Differences.Count} differ, {comparison.Same} unchanged");
+                    : $"behaviour contract does not hold: {comparison.Differences.Count} differ, {comparison.Same} unchanged" +
+                      (comparison.Unchecked == 0 ? "" : $", {comparison.Unchecked} not checked (an application does not start)"));
 
             return new BehaviourReport(baseline.Baseline, after, comparison, null);
         }

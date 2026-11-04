@@ -32,12 +32,17 @@ public enum ContractItemStatus
 }
 
 /// <param name="Decision">The decision (<c>D-…</c>) that allows it, when <see cref="ContractItemStatus.Allowed"/>.</param>
+/// <param name="Unchecked">
+/// On a context (<c>B-CTX-…</c>) that no longer starts: the profile's items
+/// that could not be read because of it. They are one difference, not many.
+/// </param>
 public sealed record ContractDifference(
     string Item,
     string Before,
     string? After,
     ContractItemStatus Status,
-    string? Decision);
+    string? Decision,
+    IReadOnlyList<string>? Unchecked = null);
 
 /// <param name="Differences">Every item that is not the same, in item order.</param>
 /// <param name="Same">How many baseline items are unchanged.</param>
@@ -52,6 +57,9 @@ public sealed record ContractComparison(
     /// (invariant <c>I-CONTRACT-MATCHES</c>).
     /// </summary>
     public bool Matches => Differences.All(difference => difference.Status == ContractItemStatus.Allowed);
+
+    /// <summary>Items not checked because their application no longer starts.</summary>
+    public int Unchecked => Differences.Sum(difference => difference.Unchecked?.Count ?? 0);
 }
 
 public static class BehaviourContract
@@ -61,6 +69,12 @@ public static class BehaviourContract
     /// item must keep its value; one that is missing or unreadable afterwards
     /// is <see cref="ContractItemStatus.Unavailable"/>, never assumed the same.
     /// </summary>
+    /// <remarks>
+    /// When a profile's application started on the baseline and no longer
+    /// does, its unreadable items are folded into that one context difference
+    /// (<see cref="ContractDifference.Unchecked"/>): the cause, not dozens of
+    /// symptoms. Values that were read and differ are still listed.
+    /// </remarks>
     /// <param name="allowed">Item ID → the decision that allows it to differ.</param>
     public static ContractComparison Compare(
         BehaviourRecord baseline,
@@ -74,6 +88,15 @@ public static class BehaviourContract
 
         var differences = new List<ContractDifference>();
         var same = 0;
+
+        // Profiles whose application started on the baseline but not now, unless a decision allows that.
+        var stopped = baseline.Items
+            .Where(entry => entry.Key.StartsWith(ContextPrefix, StringComparison.Ordinal)
+                            && entry.Value == ContextStarts
+                            && after.Items.TryGetValue(entry.Key, out var now)
+                            && now != ContextStarts
+                            && !allowed.ContainsKey(entry.Key))
+            .ToDictionary(entry => entry.Key[ContextPrefix.Length..], _ => new List<string>(), StringComparer.Ordinal);
 
         foreach (var (item, before) in baseline.Items.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
@@ -89,6 +112,15 @@ public static class BehaviourContract
                 ? ContractItemStatus.Unavailable
                 : ContractItemStatus.Changed;
 
+            if (status == ContractItemStatus.Unavailable
+                && !allowed.ContainsKey(item)
+                && ProfileOf(item, stopped.Keys) is { } profile
+                && stopped.TryGetValue(profile, out var hidden))
+            {
+                hidden.Add(item);
+                continue;
+            }
+
             var decision = allowed.GetValueOrDefault(item);
 
             differences.Add(new ContractDifference(
@@ -99,11 +131,42 @@ public static class BehaviourContract
                 decision));
         }
 
+        foreach (var (profile, hidden) in stopped.Where(entry => entry.Value.Count > 0))
+        {
+            var index = differences.FindIndex(difference => difference.Item == ContextPrefix + profile);
+            differences[index] = differences[index] with { Unchecked = hidden };
+        }
+
         var added = after.Items.Keys
             .Where(item => !baseline.Items.ContainsKey(item))
             .Order(StringComparer.Ordinal)
             .ToList();
 
         return new ContractComparison(differences, same, added);
+    }
+
+    private const string ContextPrefix = "B-CTX-";
+    private const string ContextStarts = "starts";
+
+    /// <summary>
+    /// Which of <paramref name="profiles"/> an item belongs to:
+    /// <c>B-SEC-production-GET /x-VIEWER</c> → <c>production</c>. Matched,
+    /// not split, because profile names can contain hyphens.
+    /// </summary>
+    private static string? ProfileOf(
+        string item,
+        IEnumerable<string> profiles)
+    {
+        var kindEnd = item.StartsWith(ContextPrefix, StringComparison.Ordinal) ? -1 : item.IndexOf('-', 2);
+
+        if (kindEnd < 0)
+        {
+            return null;
+        }
+
+        var rest = item[(kindEnd + 1)..];
+        return profiles
+            .Where(profile => rest.StartsWith(profile + "-", StringComparison.Ordinal))
+            .MaxBy(profile => profile.Length);
     }
 }
