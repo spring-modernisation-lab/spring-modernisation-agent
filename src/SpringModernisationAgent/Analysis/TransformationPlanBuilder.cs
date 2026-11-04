@@ -50,7 +50,10 @@ public sealed class TransformationPlanBuilder
                 .Select(recipe => new OpenRewriteTransformation(
                     Recipe: recipe.Recipe,
                     Artifact: recipe.Artifact,
-                    Version: recipe.Version))
+                    Version: recipe.Version)
+                {
+                    Configuration = recipe.Configuration
+                })
                 .ToList(),
             Validation: route.Validation.ToList());
     }

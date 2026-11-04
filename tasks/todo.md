@@ -230,11 +230,24 @@ Design: [`docs/system-design.md`](../docs/system-design.md). §2 explains why th
 - [ ] No more CI runs of the open loop to probe agent behaviour. The next CI run tests 8.1–8.5 together.
 - [x] R24 recorded in `tasks/demo-traps.md` as the last run of the old design.
 
-### 8.1 First durable fix: T3 as a recipe (design §5) *(no CI for the recipe; CI to confirm)*
+### 8.1 First durable fix: T3 as a recipe (design §5)
 
-- [ ] A declarative recipe in the route that rewrites `javax.servlet` string literals to `jakarta.servlet`, keeping each sub-package (`.http.HttpServletRequest` must stay `.http`). Check the exact OpenRewrite building block in the pinned `rewrite` versions before choosing it; write a small custom recipe if none fits.
-- [ ] Added to `spring-boot-application-2.7-to-3` in `spring.yaml`, after the Boot and Java recipes.
-- Verify: applied to R24's post-OpenRewrite tree, it reproduces R14 attempt 3's change exactly. In CI, trap T3 no longer reaches the AI.
+- [x] `lab.jakarta.ServletStringLiterals` in `Config/recipes/lab-recipes.yml`: a declarative recipe built from the core `org.openrewrite.java.ChangePackageInStringLiteral` (`javax.servlet` → `jakarta.servlet`).
+  - Its source in rewrite-java 8.89.0, the version our pinned plugin 6.46.1 loads, was read before choosing it. It replaces the package prefix and keeps the rest of the name, so `.http.HttpServletRequest` stays `.http`.
+  - The ready-made `JavaxRuntimeTypeNamesToJakarta` was considered and rejected: it isn't in the pinned rewrite-migrate-java 3.42.1.
+- [x] **Pipeline recipes:** a route recipe may name a `configuration` file under `Config/` instead of an artifact.
+  - It's pinned by the plugin version, because it uses only core recipes.
+  - The runner passes it with `-Drewrite.configLocation`, so it is never written into the repository or a patch.
+  - Validation rejects a configuration together with an artifact, and paths outside `Config/`. The runner refuses a missing file before Maven runs.
+  - The plan JSON carries it, and older plans still read. The probe workflow handles it.
+- [x] Added to `spring-boot-application-2.7-to-3` after the Boot and Java recipes (only that route has servlet code).
+- [x] Verified locally. There is no JDK here, so the recipe's own logic (its regex on string literals) was applied to `orders-service` after R24's OpenRewrite stage:
+  - it changes exactly the three literals in `ServletContainerCompatibilityCheck`;
+  - the result is **identical to R14 attempt 3's fix**;
+  - no other source or test contains a `javax.servlet` string.
+
+  Tests cover the route order, the recipe file, the validator, the runner arguments, refusal of missing and outside files, and plan JSON (574 pass).
+- [ ] Confirm in CI with the **OpenRewrite probe** workflow (no AI, about 5 minutes): its `openrewrite.patch` must contain the three `jakarta.servlet` literals. Then T3 never reaches the AI in the next full run.
 
 ### 8.2 Behaviour contract v1 (design §3)
 

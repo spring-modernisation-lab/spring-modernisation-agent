@@ -21,7 +21,8 @@ public sealed class OpenRewriteExecutionPlanBuilder
             .Select(recipe => new OpenRewriteExecutionRecipe(
                 Recipe: recipe.Recipe,
                 Artifact: recipe.Artifact,
-                Version: recipe.Version))
+                Version: recipe.Version,
+                Configuration: recipe.Configuration))
             .ToList();
 
         return new OpenRewriteExecutionPlan(

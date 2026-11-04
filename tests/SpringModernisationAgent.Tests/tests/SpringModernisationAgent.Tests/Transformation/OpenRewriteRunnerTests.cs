@@ -399,6 +399,75 @@ public class OpenRewriteRunnerTests
         }
     }
 
+    [Fact]
+    public async Task RunAsync_PipelineRecipe_PassesItsFileFromOutsideTheRepositoryAndNoArtifact()
+    {
+        var repositoryPath = CreateTemporaryDirectory();
+        var configDirectory = CreateTemporaryDirectory();
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(configDirectory, "recipes"));
+            File.WriteAllText(Path.Combine(configDirectory, "recipes", "lab-recipes.yml"), "type: x\n");
+
+            var processRunner = new FakeMavenProcessRunner([new MavenProcessResult(0, "ok", string.Empty)]);
+            var runner = new OpenRewriteRunner(
+                processRunner, new FakeRepositoryChangeDetector(), mavenPluginVersion: "6.46.1", configDirectory);
+
+            var result = await runner.RunAsync(CreateExecutionPlan(repositoryPath) with
+            {
+                Recipes = [new OpenRewriteExecutionRecipe("lab.jakarta.ServletStringLiterals", "", "", "recipes/lab-recipes.yml")]
+            });
+
+            Assert.Equal(TransformationStatus.Succeeded, result.Status);
+            Assert.Equal(
+                [
+                    "--batch-mode",
+                    "org.openrewrite.maven:rewrite-maven-plugin:6.46.1:runNoFork",
+                    "-Drewrite.activeRecipes=lab.jakarta.ServletStringLiterals",
+                    $"-Drewrite.configLocation={Path.Combine(Path.GetFullPath(configDirectory), "recipes", "lab-recipes.yml")}"
+                ],
+                Assert.Single(processRunner.Calls).Arguments);
+        }
+        finally
+        {
+            DeleteDirectory(repositoryPath);
+            DeleteDirectory(configDirectory);
+        }
+    }
+
+    [Theory]
+    [InlineData("recipes/missing.yml", "was not found")]
+    [InlineData("../outside.yml", "outside the Config folder")]
+    public async Task RunAsync_PipelineRecipeFileMissingOrOutsideConfig_IsRefusedBeforeMavenRuns(
+        string configuration,
+        string expected)
+    {
+        var repositoryPath = CreateTemporaryDirectory();
+        var configDirectory = CreateTemporaryDirectory();
+
+        try
+        {
+            var processRunner = new FakeMavenProcessRunner();
+            var runner = new OpenRewriteRunner(
+                processRunner, new FakeRepositoryChangeDetector(), mavenPluginVersion: "6.46.1", configDirectory);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync(
+                CreateExecutionPlan(repositoryPath) with
+                {
+                    Recipes = [new OpenRewriteExecutionRecipe("lab.x", "", "", configuration)]
+                }));
+
+            Assert.Contains(expected, exception.Message);
+            Assert.Empty(processRunner.Calls);
+        }
+        finally
+        {
+            DeleteDirectory(repositoryPath);
+            DeleteDirectory(configDirectory);
+        }
+    }
+
     private static OpenRewriteExecutionPlan CreateExecutionPlan(
         string repositoryPath)
     {

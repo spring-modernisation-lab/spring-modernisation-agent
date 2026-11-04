@@ -22,6 +22,11 @@ routes:
           artifact: "org.openrewrite.recipe:rewrite-migrate-java"
           version: "3.42.1"
 
+        # Pipeline recipe (Config/recipes/lab-recipes.yml): javax.servlet in
+        # string literals, which the Jakarta type rewriting does not reach (T3).
+        - recipe: "lab.jakarta.ServletStringLiterals"
+          configuration: "recipes/lab-recipes.yml"
+
     requirements:
       buildSystems:
         - maven

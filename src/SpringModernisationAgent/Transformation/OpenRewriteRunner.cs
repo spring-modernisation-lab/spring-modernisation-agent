@@ -9,11 +9,17 @@ public sealed class OpenRewriteRunner : IOpenRewriteRunner
     private readonly IMavenProcessRunner _mavenProcessRunner;
     private readonly IRepositoryChangeDetector _changeDetector;
     private readonly string _mavenPluginVersion;
+    private readonly string _configDirectory;
 
+    /// <param name="configDirectory">
+    /// Where pipeline recipe files are resolved from; defaults to the
+    /// application's <c>Config</c> folder.
+    /// </param>
     public OpenRewriteRunner(
         IMavenProcessRunner mavenProcessRunner,
         IRepositoryChangeDetector changeDetector,
-        string mavenPluginVersion)
+        string mavenPluginVersion,
+        string? configDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(mavenProcessRunner);
         ArgumentNullException.ThrowIfNull(changeDetector);
@@ -22,6 +28,7 @@ public sealed class OpenRewriteRunner : IOpenRewriteRunner
         _mavenProcessRunner = mavenProcessRunner;
         _changeDetector = changeDetector;
         _mavenPluginVersion = mavenPluginVersion;
+        _configDirectory = Path.GetFullPath(configDirectory ?? Path.Combine(AppContext.BaseDirectory, "Config"));
     }
 
     public async Task<TransformationResult> RunAsync(
@@ -103,18 +110,26 @@ public sealed class OpenRewriteRunner : IOpenRewriteRunner
         // execute one at a time, so after the first recipe the code is
         // intentionally mid-migration and will not compile; compilation
         // belongs to post-transformation validation, not recipe execution.
-        var arguments = new[]
+        var arguments = new List<string>
         {
                 "--batch-mode",
 
                 $"org.openrewrite.maven:rewrite-maven-plugin:" +
                 $"{_mavenPluginVersion}:runNoFork",
 
-                $"-Drewrite.activeRecipes={recipe.Recipe}",
-
-                $"-Drewrite.recipeArtifactCoordinates=" +
-                $"{recipe.Artifact}:{recipe.Version}"
+                $"-Drewrite.activeRecipes={recipe.Recipe}"
         };
+
+        if (recipe.Configuration is null)
+        {
+            arguments.Add($"-Drewrite.recipeArtifactCoordinates={recipe.Artifact}:{recipe.Version}");
+        }
+        else
+        {
+            // A pipeline recipe: its file stays outside the repository, so
+            // it never appears in a patch.
+            arguments.Add($"-Drewrite.configLocation={ResolveConfiguration(recipe)}");
+        }
 
         return await _mavenProcessRunner.RunAsync(
             repositoryPath,
@@ -133,6 +148,11 @@ public sealed class OpenRewriteRunner : IOpenRewriteRunner
                 "The OpenRewrite recipe name is missing.");
         }
 
+        if (recipe.Configuration is not null)
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(recipe.Artifact))
         {
             throw new InvalidOperationException(
@@ -144,6 +164,27 @@ public sealed class OpenRewriteRunner : IOpenRewriteRunner
             throw new InvalidOperationException(
                 $"OpenRewrite recipe '{recipe.Recipe}' has no pinned version.");
         }
+    }
+
+    /// <summary>The recipe file's full path; it must exist inside the Config folder.</summary>
+    private string ResolveConfiguration(
+        OpenRewriteExecutionRecipe recipe)
+    {
+        var path = Path.GetFullPath(Path.Combine(_configDirectory, recipe.Configuration!));
+
+        if (!path.StartsWith(_configDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"OpenRewrite recipe '{recipe.Recipe}' configuration '{recipe.Configuration}' is outside the Config folder.");
+        }
+
+        if (!File.Exists(path))
+        {
+            throw new InvalidOperationException(
+                $"OpenRewrite recipe '{recipe.Recipe}' configuration was not found: Config/{recipe.Configuration}");
+        }
+
+        return path;
     }
 
     private static TransformationResult NotRun(

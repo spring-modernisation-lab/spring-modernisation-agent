@@ -17,4 +17,8 @@ public sealed record TransformationTarget(
 public sealed record OpenRewriteTransformation(
     string Recipe,
     string Artifact,
-    string Version);
+    string Version)
+{
+    /// <summary>A pipeline recipe's file, relative to the Config folder; null for published recipes.</summary>
+    public string? Configuration { get; init; }
+}

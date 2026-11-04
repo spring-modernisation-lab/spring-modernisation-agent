@@ -1,0 +1,26 @@
+# Pipeline-owned OpenRewrite recipes: durable fixes (docs/system-design.md §5).
+#
+# Each recipe here replaces work the Remediation Agent used to redo every run.
+# Rules for this file:
+#   - build only from recipes in the OpenRewrite core library that the pinned
+#     rewrite-maven-plugin already loads (6.46.1 -> rewrite 8.89.0), so the
+#     plugin version pins them and no extra artifact is needed;
+#   - each recipe names the trap and the runs it came from;
+#   - a route uses a recipe here with `configuration: recipes/lab-recipes.yml`
+#     in Config/spring.yaml. The runner passes this file to the plugin with
+#     -Drewrite.configLocation, so it is never written into the repository.
+---
+type: specs.openrewrite.org/v1beta/recipe
+name: lab.jakarta.ServletStringLiterals
+displayName: Rename javax.servlet in string literals
+description: >-
+  Renames javax.servlet to jakarta.servlet inside String literals, keeping
+  the rest of each name (javax.servlet.http.HttpServletRequest becomes
+  jakarta.servlet.http.HttpServletRequest). Import and type rewriting does
+  not reach strings, so class names used reflectively survive the Jakarta
+  migration and fail at runtime. Trap T3: the Remediation Agent fixed this by
+  hand in R14, R20, R21 and R23, and broke it in R24.
+recipeList:
+  - org.openrewrite.java.ChangePackageInStringLiteral:
+      oldPackageName: javax.servlet
+      newPackageName: jakarta.servlet

@@ -24,5 +24,8 @@
   <Content Include="Config\knowledge\*.yaml">
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </Content>
+  <Content Include="Config\recipes\*.yml">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </Content>
 </ItemGroup>
 </Project>

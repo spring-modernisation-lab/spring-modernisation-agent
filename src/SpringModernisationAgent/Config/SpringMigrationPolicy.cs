@@ -50,6 +50,14 @@ public sealed class OpenRewriteRecipeConfiguration
     public string Artifact { get; set; } = string.Empty;
 
     public string Version { get; set; } = string.Empty;
+
+    /// <summary>
+    /// For a pipeline recipe: its declarative recipe file, relative to the
+    /// application's <c>Config</c> folder (for example
+    /// <c>recipes/lab-recipes.yml</c>). It uses only recipes in the core
+    /// library the pinned plugin loads, so it has no artifact or version.
+    /// </summary>
+    public string? Configuration { get; set; }
 }
 
 public sealed class MigrationRequirements

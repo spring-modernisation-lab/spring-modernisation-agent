@@ -61,4 +61,6 @@ The planned control-plane commands (`run start`, `run status`, `run fetch`, `dig
 
 Routes, recipes and validation checks per repository kind: `src/SpringModernisationAgent/Config/spring.yaml`.
 
+Pipeline-owned OpenRewrite recipes (durable fixes, for example `lab.jakarta.ServletStringLiterals` for `javax.servlet` names in string literals): `src/SpringModernisationAgent/Config/recipes/lab-recipes.yml`. A route uses one with `configuration: recipes/lab-recipes.yml` instead of an artifact.
+
 Libraries Spring Boot 3 dropped, with their manual steps: `src/SpringModernisationAgent/Config/knowledge/unsupported-libraries.yaml`. Adding a library is one entry, with no code change; the file's header lists the fields and how each is used.

@@ -286,8 +286,9 @@ public sealed class TransformCommand
                     $"      - {recipe.Recipe}");
 
                 Console.WriteLine(
-                    $"        {recipe.Artifact}:" +
-                    $"{recipe.Version}");
+                    recipe.Configuration is null
+                        ? $"        {recipe.Artifact}:{recipe.Version}"
+                        : $"        pipeline recipe: Config/{recipe.Configuration}");
             }
 
             Console.WriteLine(

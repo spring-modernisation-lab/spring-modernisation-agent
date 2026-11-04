@@ -94,14 +94,23 @@ jobs:
 
           for entry in "${entries[@]}"; do
             recipe=$(echo "$entry" | jq -r '.recipe')
-            artifact=$(echo "$entry" | jq -r '.artifact')
-            version=$(echo "$entry" | jq -r '.version')
+            artifact=$(echo "$entry" | jq -r '.artifact // empty')
+            version=$(echo "$entry" | jq -r '.version // empty')
+            configuration=$(echo "$entry" | jq -r '.configuration // empty')
 
-            echo "::group::$recipe ($artifact:$version)"
+            # A pipeline recipe names a file under Config/ (outside this
+            # repository) instead of a published artifact.
+            if [ -n "$configuration" ]; then
+              source="-Drewrite.configLocation=$GITHUB_WORKSPACE/$(dirname "$POLICY_PATH")/$configuration"
+            else
+              source="-Drewrite.recipeArtifactCoordinates=${artifact}:${version}"
+            fi
+
+            echo "::group::$recipe (${configuration:-$artifact:$version})"
             mvn --batch-mode \
               "org.openrewrite.maven:rewrite-maven-plugin:${OPENREWRITE_MAVEN_PLUGIN_VERSION}:runNoFork" \
               "-Drewrite.activeRecipes=${recipe}" \
-              "-Drewrite.recipeArtifactCoordinates=${artifact}:${version}" \
+              "$source" \
               2>&1 | tee -a "$OUTPUT_DIR/openrewrite.log"
             echo "::endgroup::"
           done
