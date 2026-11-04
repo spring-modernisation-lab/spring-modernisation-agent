@@ -124,6 +124,35 @@ public class OpenRewriteExecutionCoordinatorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RecordsUnsupportedLibrariesFoundInTheAssessedSource()
+    {
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(workspacePath, "pom.xml"),
+                "<dependency><groupId>net.sf.ehcache</groupId><artifactId>ehcache</artifactId></dependency>");
+
+            var coordinator = CreateCoordinator(
+                new FakeWorkspaceProvider
+                {
+                    Workspace = new RepositoryWorkspace("customer-service", workspacePath, CommitSha)
+                },
+                new FakeRepositoryWorkspaceCleaner(),
+                new FakeOpenRewriteRunner());
+
+            var result = await coordinator.ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            Assert.Equal(["Ehcache 2"], result.UnsupportedLibraries);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Success_CleansWorkspace()
     {
         var workspacePath = CreateTemporaryDirectory();

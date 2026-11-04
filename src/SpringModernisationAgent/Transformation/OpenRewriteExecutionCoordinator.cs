@@ -99,6 +99,18 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 transformationPlan,
                 workspace.RepositoryPath);
 
+            // Read from the assessed source, before anything changes it.
+            var unsupportedLibraries = UnsupportedLibraries.FindIn(workspace.RepositoryPath)
+                .Select(library => library.Name)
+                .ToList();
+
+            if (unsupportedLibraries.Count > 0)
+            {
+                _progress.Report(
+                    repository,
+                    $"unsupported libraries (need a person): {string.Join(", ", unsupportedLibraries)}");
+            }
+
             _progress.Report(
                 repository,
                 $"running OpenRewrite ({executionPlan.Recipes.Count} recipes)");
@@ -122,7 +134,10 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 return new TransformationExecutionResult(
                     Transformation: transformationResult,
                     Validation: CreateNotRunValidation(
-                        transformationPlan));
+                        transformationPlan))
+                {
+                    UnsupportedLibraries = unsupportedLibraries
+                };
             }
 
             // Snapshot OpenRewrite's changes before Maven runs.
@@ -198,7 +213,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
             {
                 Patches = patches,
                 PatchRecordingError = patchRecordingError,
-                Remediation = remediation
+                Remediation = remediation,
+                UnsupportedLibraries = unsupportedLibraries
             };
 
             _progress.Report(

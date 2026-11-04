@@ -72,6 +72,7 @@ public static class PullRequestContentBuilder
             AppendDecision(body, result.Remediation!);
         }
 
+        AppendUnsupportedLibraries(body, result);
         AppendOutcome(body, result);
         AppendFlags(body, flags);
         AppendChanges(body, result);
@@ -120,6 +121,57 @@ public static class PullRequestContentBuilder
             foreach (var option in proposal.Options)
             {
                 body.AppendLine($"- {option}");
+            }
+        }
+
+        body.AppendLine();
+    }
+
+    /// <summary>Fixed guidance from <see cref="UnsupportedLibraries"/>: the same steps every run.</summary>
+    private static void AppendUnsupportedLibraries(
+        StringBuilder body,
+        TransformationExecutionResult result)
+    {
+        var libraries = result.UnsupportedLibraries
+            .Select(UnsupportedLibraries.Find)
+            .OfType<UnsupportedLibrary>()
+            .ToList();
+
+        if (libraries.Count == 0)
+        {
+            return;
+        }
+
+        body.AppendLine("## Unsupported libraries: manual steps");
+        body.AppendLine();
+        body.AppendLine(
+            "Spring Boot 3 no longer supports these libraries. Replacing them changes `pom.xml` and often test " +
+            "resources, which the pipeline never lets the AI edit, so a person makes these changes on this branch. " +
+            "This guidance is fixed text from the pipeline, not AI-generated.");
+
+        foreach (var library in libraries)
+        {
+            body.AppendLine();
+            body.AppendLine($"### {library.Name} (`{library.Package}`)");
+            body.AppendLine();
+            body.AppendLine($"**Recommended:** {library.Recommended}.");
+            body.AppendLine();
+
+            for (var index = 0; index < library.ManualSteps.Count; index++)
+            {
+                body.AppendLine($"{index + 1}. {library.ManualSteps[index]}");
+            }
+
+            if (library.Alternatives.Count > 0)
+            {
+                body.AppendLine();
+                body.AppendLine("**Alternatives:**");
+                body.AppendLine();
+
+                foreach (var alternative in library.Alternatives)
+                {
+                    body.AppendLine($"- {alternative}");
+                }
             }
         }
 

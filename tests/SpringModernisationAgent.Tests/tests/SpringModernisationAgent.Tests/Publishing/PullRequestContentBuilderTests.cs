@@ -56,6 +56,49 @@ public class PullRequestContentBuilderTests
         Assert.DoesNotContain("## AI explanation", content.Body);
     }
 
+    [Fact]
+    public void Build_UnsupportedLibraries_ListFixedManualStepsBetweenTheDecisionAndTheOutcome()
+    {
+        var result = CreateResult(passed: false, RemediationOutcome.NeedsHumanDecision) with
+        {
+            UnsupportedLibraries = ["Ehcache 2", "Not a known library"]
+        };
+
+        var body = PullRequestContentBuilder.Build(CreatePlan(), result, [], null)!.Body;
+
+        var decision = body.IndexOf("## Decision needed", StringComparison.Ordinal);
+        var steps = body.IndexOf("## Unsupported libraries: manual steps", StringComparison.Ordinal);
+        var outcome = body.IndexOf("## Outcome", StringComparison.Ordinal);
+
+        Assert.True(decision < steps && steps < outcome);
+        Assert.Contains("not AI-generated", body);
+        Assert.Contains("which the pipeline never lets the AI edit", body);
+        Assert.Contains("### Ehcache 2 (`net.sf.ehcache`)", body);
+        Assert.Contains("**Recommended:** Ehcache 3 through JCache", body);
+        Assert.Contains("1. `pom.xml`: replace `net.sf.ehcache:ehcache` with `org.ehcache:ehcache`", body);
+        Assert.Contains("- Caffeine:", body);
+        Assert.DoesNotContain("Not a known library", body);
+    }
+
+    [Fact]
+    public void Build_NoUnsupportedLibraries_HasNoManualStepsSection()
+    {
+        var body = PullRequestContentBuilder.Build(CreatePlan(), CreateResult(passed: true, RemediationOutcome.Fixed), [], null)!.Body;
+
+        Assert.DoesNotContain("Unsupported libraries", body);
+    }
+
+    [Fact]
+    public void UnsupportedLibraries_EveryEntryHasARecommendationAndManualSteps()
+    {
+        Assert.All(UnsupportedLibraries.All, library =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(library.Recommended));
+            Assert.NotEmpty(library.ManualSteps);
+            Assert.Contains(library.ManualSteps, step => step.Contains("pom.xml", StringComparison.Ordinal));
+        });
+    }
+
     [Theory]
     [InlineData(false, RemediationOutcome.AttemptsExhausted)]
     [InlineData(false, RemediationOutcome.CannotFix)]

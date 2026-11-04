@@ -28,4 +28,10 @@ public sealed record TransformationExecutionResult(
     /// which is always the final, authoritative Maven result.
     /// </summary>
     public RemediationReport? Remediation { get; init; }
+
+    /// <summary>
+    /// Names of libraries in the repository that the target platform no
+    /// longer supports, found deterministically in the assessed source.
+    /// </summary>
+    public IReadOnlyList<string> UnsupportedLibraries { get; init; } = [];
 }
