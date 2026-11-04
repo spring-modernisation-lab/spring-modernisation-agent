@@ -349,8 +349,21 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 
 ### 8.3 Problem kinds and knowledge (design §4, §9.2) *(no CI)*
 
-- [ ] `diagnostic-signatures.yaml`: pattern → `K-*`, plus a recipe or mapping. `api-mappings.yaml`: `M-HIBERNATE-6-USERTYPE`, `M-HTTPCLIENT-5-POOL`, `M-SECURITY-6-FILTERCHAIN`, each with checked notes and the contract items a port must keep. For example, `M-HTTPCLIENT-5-POOL` keeps the TTL through `ConnectionConfig`, which answers R14 and R24.
-- [ ] The classifier assigns exactly one kind to every failing test and diagnostic group. `K-PLATFORM-DROPPED` comes from the catalogue, now (and from the BOM comparison, 8.9).
+- [x] **`diagnostic-signatures.yaml`**: 7 signatures, ordered, first match wins: `knock-on`, `mechanical` (T3 → the recipe), `platform-dropped` (Ehcache 2, only if the repository uses it), `contract` (an HTTP status changed), and three `api-move`s. Each names the runs it was written from.
+- [x] **`api-mappings.yaml`**: `M-SECURITY-6-FILTERCHAIN`, `M-HIBERNATE-6-USERTYPE` and `M-HTTPCLIENT-5-POOL`, each with checked notes and what the port must keep. For example, the HttpClient notes say the TTL moves to `ConnectionConfig`, not `setValidateAfterInactivity` (R14, R24), and the Hibernate notes record that `MigrateUserType` is unsuitable (probe #6).
+- [x] **`ProblemKnowledge`** validates both files together: every mapping, recipe (`Config/recipes`) and library (the catalogue) a signature names must exist; ids are unique; patterns compile.
+- [x] **`ProblemClassifier`**: a source file's compile errors form one problem; each failing test is one problem. Exactly one kind each. Compile errors in a file that was already an API move, with no signature of their own, inherit its kind (a port's follow-up errors, its repair evidence).
+- [x] **In the pipeline:** the coordinator classifies what the recipes left and records it on the result (`Problems`). The job summary shows a "problems left by the recipes" table: kind, who handles it, and which files or tests.
+- **Verified on every recorded failure** (probe #5 plus each attempt's failed check in R14, R16 and R20–R24), with **nothing unknown**:
+  - T4 Security, T1 `CustomerOrder` and `MoneyUserType`, and T2 HttpClient are API moves with the right mappings;
+  - T3 is mechanical (8 times);
+  - T5 is contract (5 times);
+  - T6 is platform-dropped (20 times, including the AI's own cache workarounds and bean conflicts);
+  - 40 knock-on context failures;
+  - 2 port follow-ups (R14's wrong `AuthenticationConfiguration` import, and an unused `commons-lang3` import).
+
+  The first pass had 4 unknowns. The two principled fixes were follow-up inheritance and Spring's cache API in the Ehcache signature.
+- 15 tests (the real shapes, library gating, follow-ups, unattributed failures, the shipped knowledge, 6 knowledge mistakes, the job summary, the coordinator). 620 pass.
 - [ ] Move the behaviour-annotation and settings rules into `Config/knowledge/` (the catalogue is already there).
 - Verify: on the recorded diagnostics of R13–R24, every problem is classified; T3 → `K-MECHANICAL`, T1/T2/T4 → `K-API-MOVE`, T5 → `K-CONTRACT`, T6 → `K-PLATFORM-DROPPED`; nothing is `K-UNKNOWN`.
 

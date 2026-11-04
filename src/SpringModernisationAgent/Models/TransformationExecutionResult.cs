@@ -58,4 +58,11 @@ public sealed record TransformationExecutionResult(
     /// Suggestions only: never applied.
     /// </summary>
     public RecipeDiscoveryReport? RecipeDiscovery { get; init; }
+
+    /// <summary>
+    /// The failures OpenRewrite's recipes left, each with exactly one kind
+    /// (docs/system-design.md §4), classified from facts before any AI work.
+    /// Empty when validation passed or classification was off.
+    /// </summary>
+    public IReadOnlyList<SpringModernisationAgent.Triage.ClassifiedProblem> Problems { get; init; } = [];
 }

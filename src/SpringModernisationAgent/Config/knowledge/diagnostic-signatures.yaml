@@ -1,0 +1,89 @@
+# How a failure is classified (docs/system-design.md §4).
+#
+# Each failure is a problem: a source file's compile errors (all of them, so
+# "method does not override" follows its file), or one failing test with its
+# root cause. Signatures are tried in order and the first match wins. A
+# problem nothing matches is K-UNKNOWN: the AI may diagnose it, never edit.
+#
+# Kinds:
+#   knock-on          - fails only because another test's context failed;
+#                       not a problem in itself, re-checked after other fixes
+#   mechanical        - a deterministic recipe fixes it (name the recipe)
+#   api-move          - a known API move: a scoped AI port (name the mapping
+#                       in api-mappings.yaml)
+#   platform-dropped  - a library the platform dropped (name it as in
+#                       unsupported-libraries.yaml); applies only when the
+#                       repository uses that library; goes to a person
+#   contract          - an HTTP status or URL changed; goes to a person
+#
+# Matching: `contains` is literal text, `pattern` a regular expression; a
+# problem matches if any entry matches its evidence (file path, messages,
+# symbols, test name, root cause).
+#
+# Compile errors in a file that was already an api-move problem, with no
+# signature of their own (a port's follow-up errors, such as a wrong import),
+# inherit that problem's kind and mapping when the previous classification is
+# given: they are the port's repair evidence.
+#
+# Every signature names the runs whose real failures it was written from.
+
+signatures:
+  - id: S-CONTEXT-KNOCK-ON
+    kind: knock-on
+    contains:
+      - "ApplicationContext failure threshold"
+    seenIn: [R14, R16, R20, R21, R22, R23, R24]
+
+  - id: S-JAVAX-SERVLET-STRING
+    kind: mechanical
+    recipe: lab.jakarta.ServletStringLiterals
+    contains:
+      - "ClassNotFoundException: javax.servlet"
+    seenIn: [R14, R20, R21, R22, R23, R24]
+
+  - id: S-EHCACHE-2
+    kind: platform-dropped
+    library: "Ehcache 2"
+    contains:
+      - "net.sf.ehcache"
+      - "cacheManager"
+      - "CacheManager"
+      - "CacheType"
+      - "Caching"
+      - "org.springframework.cache"
+    seenIn: [R16, R20, R21, R22, R23, R24]
+
+  - id: S-HTTP-CONTRACT
+    kind: contract
+    pattern:
+      - "Status expected:<\\d+> but was:<\\d+>"
+    seenIn: [R14, R20, R21, R23]
+
+  - id: S-SECURITY-ADAPTER
+    kind: api-move
+    mapping: M-SECURITY-6-FILTERCHAIN
+    contains:
+      - "WebSecurityConfigurerAdapter"
+      - "AuthenticationManagerBuilder"
+      - "AuthenticationConfiguration"
+      - "SecurityFilterChain"
+    seenIn: [R4, R13, R14, P5]
+
+  - id: S-HIBERNATE-USERTYPE
+    kind: api-move
+    mapping: M-HIBERNATE-6-USERTYPE
+    contains:
+      - "org.hibernate.usertype.UserType"
+      - "nullSafeGet"
+      - "UserType<"
+    seenIn: [R4, R13, R14, P5]
+
+  - id: S-HTTPCLIENT-5-POOL
+    kind: api-move
+    mapping: M-HTTPCLIENT-5-POOL
+    contains:
+      - "org.apache.hc.client5"
+      - "setMaxConnTotal"
+      - "setMaxConnPerRoute"
+      - "setConnectionTimeToLive"
+    seenIn: [R4, R13, R14, P5]

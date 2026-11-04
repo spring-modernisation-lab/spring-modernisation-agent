@@ -79,12 +79,68 @@ public static class TransformationSummaryWriter
             }
         }
 
+        foreach (var result in results.Where(result => result.Problems.Count > 0))
+        {
+            AppendProblems(markdown, result.Transformation.RepositoryName, result.Problems);
+        }
+
         foreach (var result in results.Where(result => result.RecipeDiscovery is not null))
         {
             AppendRecipeDiscovery(markdown, result.Transformation.RepositoryName, result.RecipeDiscovery!);
         }
 
         return markdown.ToString();
+    }
+
+    /// <summary>What the recipes left, by kind: who or what handles each problem.</summary>
+    private static void AppendProblems(
+        StringBuilder markdown,
+        string repository,
+        IReadOnlyList<SpringModernisationAgent.Triage.ClassifiedProblem> problems)
+    {
+        markdown.AppendLine();
+        markdown.AppendLine($"### {repository}: problems left by the recipes");
+        markdown.AppendLine();
+        markdown.AppendLine("Classified from facts (`Config/knowledge/diagnostic-signatures.yaml`), before any AI work.");
+        markdown.AppendLine();
+        markdown.AppendLine("| Kind | Handled by | Problems |");
+        markdown.AppendLine("|---|---|---|");
+
+        foreach (var group in problems.GroupBy(problem => problem.Kind).OrderBy(group => group.Key))
+        {
+            var route = group.Key switch
+            {
+                SpringModernisationAgent.Triage.ProblemKind.ApiMove => "AI port, scoped and checked",
+                SpringModernisationAgent.Triage.ProblemKind.Mechanical => "recipe",
+                SpringModernisationAgent.Triage.ProblemKind.PlatformDropped => "a person (decision)",
+                SpringModernisationAgent.Triage.ProblemKind.Contract => "a person (decision)",
+                SpringModernisationAgent.Triage.ProblemKind.KnockOn => "re-checked after the others",
+                _ => "AI diagnosis only"
+            };
+
+            var items = group
+                .GroupBy(problem => problem.Mapping ?? problem.Recipe ?? problem.Library)
+                .Select(byRoute =>
+                {
+                    var subjects = string.Join(", ", byRoute.Select(problem => ShortSubject(problem.Subject)).Distinct());
+                    return byRoute.Key is null ? subjects : $"{subjects} ({byRoute.Key})";
+                });
+
+            markdown.AppendLine(Row($"{group.Key} ({group.Count()})", route, string.Join("; ", items)));
+        }
+    }
+
+    /// <summary><c>src/main/java/a/B.java</c> → <c>B.java</c>; <c>a.b.CTests.method</c> → <c>CTests.method</c>.</summary>
+    private static string ShortSubject(
+        string subject)
+    {
+        if (subject.Contains('/'))
+        {
+            return subject[(subject.LastIndexOf('/') + 1)..];
+        }
+
+        var parts = subject.Split('.');
+        return parts.Length >= 2 ? $"{parts[^2]}.{parts[^1]}" : subject;
     }
 
     private static void AppendRecipeDiscovery(

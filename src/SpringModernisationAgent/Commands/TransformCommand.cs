@@ -4,6 +4,7 @@ using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Remediation;
+using SpringModernisationAgent.Triage;
 using SpringModernisationAgent.Reporting;
 using SpringModernisationAgent.Transformation;
 using SpringModernisationAgent.Workspace;
@@ -389,7 +390,9 @@ public sealed class TransformCommand
                 patchRecorder,
                 remediationLoop,
                 progress,
-                recipeDiscovery);
+                recipeDiscovery,
+                ProblemKnowledge.LoadDefault(
+                    UnsupportedLibraries.All.Select(library => library.Name).ToList()));
 
         return new MigrationWaveExecutor(
             wavePlanner,

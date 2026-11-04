@@ -1,6 +1,7 @@
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Remediation;
+using SpringModernisationAgent.Triage;
 using SpringModernisationAgent.Workspace;
 
 namespace SpringModernisationAgent.Transformation;
@@ -16,6 +17,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly IRemediationLoop? _remediationLoop;
     private readonly IMigrationProgress _progress;
     private readonly IRecipeDiscovery? _recipeDiscovery;
+    private readonly ProblemKnowledge? _problemKnowledge;
 
     public OpenRewriteExecutionCoordinator(
     IRepositoryWorkspaceProvider workspaceProvider,
@@ -26,7 +28,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     IWorkspacePatchRecorder patchRecorder,
     IRemediationLoop? remediationLoop = null,
     IMigrationProgress? progress = null,
-    IRecipeDiscovery? recipeDiscovery = null)
+    IRecipeDiscovery? recipeDiscovery = null,
+    ProblemKnowledge? problemKnowledge = null)
     {
         ArgumentNullException.ThrowIfNull(workspaceProvider);
         ArgumentNullException.ThrowIfNull(workspaceCleaner);
@@ -48,6 +51,35 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
         // Null means recipe discovery is off for this run.
         _recipeDiscovery = recipeDiscovery;
+
+        // Null means failures are not classified (tests that don't need it).
+        _problemKnowledge = problemKnowledge;
+    }
+
+    private IReadOnlyList<ClassifiedProblem> Classify(
+        string repository,
+        TransformationValidationResult validation,
+        IReadOnlyCollection<string> unsupportedLibraries)
+    {
+        var failed = validation.Checks.FirstOrDefault(check => !check.Passed);
+
+        if (_problemKnowledge is null || validation.Passed || failed is null)
+        {
+            return [];
+        }
+
+        var problems = ProblemClassifier.Classify(
+            _problemKnowledge,
+            ValidationDiagnosticsExtractor.ExtractUnbounded(failed),
+            unsupportedLibraries);
+
+        _progress.Report(
+            repository,
+            "problems left by the recipes: " + string.Join(", ", problems
+                .GroupBy(problem => problem.Kind)
+                .Select(group => $"{group.Count()} {group.Key}")));
+
+        return problems;
     }
 
     public async Task<OpenRewriteExecutionPlan> CreateExecutionPlanAsync(
@@ -158,6 +190,9 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                     workspace.RepositoryPath,
                     cancellationToken);
 
+            // What the route's recipes left, classified from facts before any AI work.
+            var problems = Classify(transformationPlan.RepositoryName, validationResult, unsupportedLibraries);
+
             // On the code the route's recipes left, before the AI changes
             // anything. Suggestions only; it works on a throwaway copy.
             var recipeDiscovery = _recipeDiscovery is null || validationResult.Passed
@@ -231,7 +266,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 PatchRecordingError = patchRecordingError,
                 Remediation = remediation,
                 UnsupportedLibraries = unsupportedLibraries,
-                RecipeDiscovery = recipeDiscovery
+                RecipeDiscovery = recipeDiscovery,
+                Problems = problems
             };
 
             _progress.Report(

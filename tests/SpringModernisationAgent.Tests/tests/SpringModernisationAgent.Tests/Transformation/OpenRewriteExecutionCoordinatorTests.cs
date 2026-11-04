@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Triage;
 using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
@@ -600,6 +601,46 @@ public class OpenRewriteExecutionCoordinatorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ValidationFails_RecordsTheClassifiedProblems()
+    {
+        var knowledge = ProblemKnowledge.LoadDefault(
+            SpringModernisationAgent.Remediation.UnsupportedLibraries.All.Select(library => library.Name).ToList());
+
+        var mavenRunner = new FakeMavenProcessRunner(
+        [
+            new MavenProcessResult(
+                1,
+                "[ERROR] /w/src/main/java/a/SecurityConfiguration.java:[12,72] cannot find symbol\n  symbol:   class WebSecurityConfigurerAdapter",
+                string.Empty),
+            SuccessfulMavenResult(),
+            SuccessfulMavenResult()
+        ]);
+
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var result = await CreateCoordinator(
+                    new FakeWorkspaceProvider
+                    {
+                        Workspace = new RepositoryWorkspace("customer-service", workspacePath, CommitSha)
+                    },
+                    new FakeRepositoryWorkspaceCleaner(),
+                    mavenProcessRunner: mavenRunner,
+                    problemKnowledge: knowledge)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            var problem = Assert.Single(result.Problems);
+            Assert.Equal(ProblemKind.ApiMove, problem.Kind);
+            Assert.Equal("M-SECURITY-6-FILTERCHAIN", problem.Mapping);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ValidationPasses_DoesNotRunRecipeDiscovery()
     {
         var discovery = new FakeRecipeDiscovery();
@@ -819,7 +860,8 @@ public class OpenRewriteExecutionCoordinatorTests
         IMavenProcessRunner? mavenProcessRunner = null,
         IWorkspacePatchRecorder? patchRecorder = null,
         IRemediationLoop? remediationLoop = null,
-        IRecipeDiscovery? recipeDiscovery = null)
+        IRecipeDiscovery? recipeDiscovery = null,
+        ProblemKnowledge? problemKnowledge = null)
     {
         var executionPlanBuilder =
             new OpenRewriteExecutionPlanBuilder();
@@ -842,7 +884,8 @@ public class OpenRewriteExecutionCoordinatorTests
             transformationValidator,
             patchRecorder ?? new FakePatchRecorder(),
             remediationLoop,
-            recipeDiscovery: recipeDiscovery);
+            recipeDiscovery: recipeDiscovery,
+            problemKnowledge: problemKnowledge);
     }
 
     private sealed class FakeRecipeDiscovery : IRecipeDiscovery

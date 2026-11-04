@@ -1,0 +1,47 @@
+# Known API moves the AI ports, one scoped task at a time (docs/system-design.md §4.1).
+#
+# Each mapping gives the AI checked notes on the target API, and names the
+# behaviour the port must keep. `mustKeep` entries become behaviour-contract
+# items in 8.2 and are checked after every port; until then they are given
+# to the AI and shown to the reviewer.
+#
+# Notes are written from the APIs as published (checked with describe_class
+# where a run needed it) and from what the runs got wrong.
+
+mappings:
+  - id: M-SECURITY-6-FILTERCHAIN
+    name: "Spring Security 6: WebSecurityConfigurerAdapter removed"
+    notes:
+      - "Replace the adapter subclass with @Bean methods: a SecurityFilterChain built from HttpSecurity, and a WebSecurityCustomizer for web.ignoring()."
+      - "In-memory users move to a UserDetailsService bean (InMemoryUserDetailsManager) using the existing PasswordEncoder bean."
+      - "authenticationManagerBean() becomes a bean taken from AuthenticationConfiguration (org.springframework.security.config.annotation.authentication.configuration)."
+      - "Keep every request rule exactly. Changing a mapping (for example adding a trailing-slash path) must not widen who may call it (R14)."
+    mustKeep:
+      - "every user and role"
+      - "ignored paths (/h2-console/**)"
+      - "who may call each endpoint and method"
+
+  - id: M-HIBERNATE-6-USERTYPE
+    name: "Hibernate 6: generic UserType<T>"
+    notes:
+      - "Implement UserType<T> for the mapped class (UserType<Money>), and type every method with it."
+      - "int[] sqlTypes() becomes int getSqlType()."
+      - "nullSafeGet(ResultSet, String[] names, ...) becomes nullSafeGet(ResultSet, int position, SharedSessionContractImplementor, Object owner), reading by position."
+      - "@Type(type = \"...\") becomes @Type(TheUserType.class) on the attribute."
+      - "OpenRewrite's MigrateUserType was measured on this code and is unsuitable: it returns and casts to BigDecimal and misses getSqlType() (probe #6)."
+    mustKeep:
+      - "the stored column format (\"amount currency\")"
+      - "null handling on read and write"
+
+  - id: M-HTTPCLIENT-5-POOL
+    name: "Apache HttpClient 5: pool and connection settings"
+    notes:
+      - "Pool limits move from HttpClientBuilder to PoolingHttpClientConnectionManager: setMaxTotal and setDefaultMaxPerRoute."
+      - "Connection time-to-live moves to ConnectionConfig.custom().setTimeToLive(TimeValue), set on the connection manager. setValidateAfterInactivity is a different setting, not a replacement (R14, R24)."
+      - "evictIdleConnections takes a TimeValue."
+      - "Request timeouts are on RequestConfig; OpenRewrite already migrates those."
+    mustKeep:
+      - "maximum connections (total and per route)"
+      - "connection time-to-live"
+      - "idle-connection eviction"
+      - "request timeouts"
