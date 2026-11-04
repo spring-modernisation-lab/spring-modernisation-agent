@@ -1,4 +1,5 @@
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Remediation;
 using SpringModernisationAgent.Workspace;
 
@@ -14,6 +15,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly IWorkspacePatchRecorder _patchRecorder;
     private readonly IRemediationLoop? _remediationLoop;
     private readonly IMigrationProgress _progress;
+    private readonly IRecipeDiscovery? _recipeDiscovery;
 
     public OpenRewriteExecutionCoordinator(
     IRepositoryWorkspaceProvider workspaceProvider,
@@ -23,7 +25,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     TransformationValidator transformationValidator,
     IWorkspacePatchRecorder patchRecorder,
     IRemediationLoop? remediationLoop = null,
-    IMigrationProgress? progress = null)
+    IMigrationProgress? progress = null,
+    IRecipeDiscovery? recipeDiscovery = null)
     {
         ArgumentNullException.ThrowIfNull(workspaceProvider);
         ArgumentNullException.ThrowIfNull(workspaceCleaner);
@@ -42,6 +45,9 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
         // Null means remediation is not enabled for this run.
         _remediationLoop = remediationLoop;
         _progress = progress ?? NullMigrationProgress.Instance;
+
+        // Null means recipe discovery is off for this run.
+        _recipeDiscovery = recipeDiscovery;
     }
 
     public async Task<OpenRewriteExecutionPlan> CreateExecutionPlanAsync(
@@ -152,6 +158,16 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                     workspace.RepositoryPath,
                     cancellationToken);
 
+            // On the code the route's recipes left, before the AI changes
+            // anything. Suggestions only; it works on a throwaway copy.
+            var recipeDiscovery = _recipeDiscovery is null || validationResult.Passed
+                ? null
+                : await _recipeDiscovery.DiscoverAsync(
+                    transformationPlan,
+                    workspace.RepositoryPath,
+                    validationResult,
+                    cancellationToken);
+
             var patches = new List<PatchArtifact>();
 
             if (openRewrite is not null)
@@ -214,7 +230,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 Patches = patches,
                 PatchRecordingError = patchRecordingError,
                 Remediation = remediation,
-                UnsupportedLibraries = unsupportedLibraries
+                UnsupportedLibraries = unsupportedLibraries,
+                RecipeDiscovery = recipeDiscovery
             };
 
             _progress.Report(

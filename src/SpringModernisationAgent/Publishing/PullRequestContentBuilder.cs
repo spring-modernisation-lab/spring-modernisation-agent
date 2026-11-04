@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Remediation;
+using SpringModernisationAgent.Reporting;
 
 namespace SpringModernisationAgent.Publishing;
 
@@ -78,6 +79,7 @@ public static class PullRequestContentBuilder
         AppendUnsupportedLibraries(body, result, libraries);
         AppendOutcome(body, result);
         AppendFlags(body, flags);
+        AppendRecipeDiscovery(body, result.RecipeDiscovery);
         AppendChanges(body, result);
 
         if (analysis is not null)
@@ -267,6 +269,78 @@ public static class PullRequestContentBuilder
             };
 
             body.AppendLine($"- **{label}** `{flag.Path}` ({flag.Stage}): {flag.Detail}");
+        }
+
+        body.AppendLine();
+    }
+
+    /// <summary>Recipes that might replace remaining work, with what measuring them showed. Never applied.</summary>
+    private static void AppendRecipeDiscovery(
+        StringBuilder body,
+        RecipeDiscoveryReport? discovery)
+    {
+        if (discovery is null || (discovery.Error is null && discovery.Suggestions.Count == 0))
+        {
+            return;
+        }
+
+        body.AppendLine("## Possible recipes for the remaining errors (suggestions, not applied)");
+        body.AppendLine();
+
+        if (discovery.Error is not null)
+        {
+            body.AppendLine($"Recipe discovery could not run: {discovery.Error}");
+            body.AppendLine();
+            return;
+        }
+
+        body.AppendLine(
+            $"The pipeline matched the errors the route's recipes left in `{discovery.FailedCheck}` against its index of " +
+            "OpenRewrite recipes, and measured the best candidates on a throwaway copy. None was applied. Adding a recipe " +
+            "to the route is a reviewed change, with a probe run as evidence.");
+        body.AppendLine();
+
+        var candidates = discovery.Suggestions
+            .Where(suggestion => suggestion.Verdict != RecipeSuggestionVerdict.AlreadyRun)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            body.AppendLine("No recipe outside the route matched these errors.");
+        }
+
+        foreach (var suggestion in candidates)
+        {
+            body.AppendLine(
+                $"- **`{suggestion.Recipe}`** (`{suggestion.Coordinates}`), matched in {RecipeDiscoveryText.Files(suggestion)}: " +
+                $"{RecipeDiscoveryText.Verdict(suggestion.Verdict)}, {RecipeDiscoveryText.Effect(suggestion)}.");
+
+            // What a reviewer needs: what it would fix if suitable, what it breaks if not.
+            var detail = suggestion.Verdict == RecipeSuggestionVerdict.Suitable ? suggestion.Removed : suggestion.Added;
+            var label = suggestion.Verdict == RecipeSuggestionVerdict.Suitable ? "fixes" : "adds";
+
+            foreach (var error in detail.Take(5))
+            {
+                body.AppendLine($"  - {label}: `{error}`");
+            }
+
+            if (detail.Count > 5)
+            {
+                body.AppendLine($"  - … and {detail.Count - 5} more");
+            }
+        }
+
+        var alreadyRun = discovery.Suggestions
+            .Where(suggestion => suggestion.Verdict == RecipeSuggestionVerdict.AlreadyRun)
+            .Select(suggestion => $"`{RecipeDiscoveryText.ShortName(suggestion.Recipe)}`")
+            .ToList();
+
+        if (alreadyRun.Count > 0)
+        {
+            body.AppendLine();
+            body.AppendLine(
+                $"Already in the route, and these errors remain: {string.Join(", ", alreadyRun)}. " +
+                "What is left there is port work, not a missing recipe.");
         }
 
         body.AppendLine();

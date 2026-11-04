@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Remediation;
@@ -575,6 +576,57 @@ public class OpenRewriteExecutionCoordinatorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ValidationFails_RunsRecipeDiscoveryOnTheWorkspaceAndKeepsItsReport()
+    {
+        var discovery = new FakeRecipeDiscovery();
+        var mavenRunner = new FakeMavenProcessRunner(
+        [
+            new MavenProcessResult(1, "[ERROR] cannot find symbol", string.Empty),
+            SuccessfulMavenResult(),
+            SuccessfulMavenResult()
+        ]);
+
+        var coordinator = CreateCoordinator(
+            CreateWorkspaceProvider(),
+            new FakeRepositoryWorkspaceCleaner(),
+            mavenProcessRunner: mavenRunner,
+            recipeDiscovery: discovery);
+
+        var result = await coordinator.ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+        Assert.Equal(["/workspace/customer-service"], discovery.RepositoryPaths);
+        Assert.Same(FakeRecipeDiscovery.Report, result.RecipeDiscovery);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidationPasses_DoesNotRunRecipeDiscovery()
+    {
+        var discovery = new FakeRecipeDiscovery();
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var result = await CreateCoordinator(
+                    new FakeWorkspaceProvider
+                    {
+                        Workspace = new RepositoryWorkspace("customer-service", workspacePath, CommitSha)
+                    },
+                    new FakeRepositoryWorkspaceCleaner(),
+                    recipeDiscovery: discovery)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            Assert.True(result.Succeeded);
+            Assert.Empty(discovery.RepositoryPaths);
+            Assert.Null(result.RecipeDiscovery);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RunnerReturnsFailedResult_RecordsNoPatches()
     {
         var recorder = new FakePatchRecorder();
@@ -766,7 +818,8 @@ public class OpenRewriteExecutionCoordinatorTests
         IOpenRewriteRunner? openRewriteRunner = null,
         IMavenProcessRunner? mavenProcessRunner = null,
         IWorkspacePatchRecorder? patchRecorder = null,
-        IRemediationLoop? remediationLoop = null)
+        IRemediationLoop? remediationLoop = null,
+        IRecipeDiscovery? recipeDiscovery = null)
     {
         var executionPlanBuilder =
             new OpenRewriteExecutionPlanBuilder();
@@ -788,7 +841,25 @@ public class OpenRewriteExecutionCoordinatorTests
             openRewriteRunner ?? new FakeOpenRewriteRunner(),
             transformationValidator,
             patchRecorder ?? new FakePatchRecorder(),
-            remediationLoop);
+            remediationLoop,
+            recipeDiscovery: recipeDiscovery);
+    }
+
+    private sealed class FakeRecipeDiscovery : IRecipeDiscovery
+    {
+        public static readonly RecipeDiscoveryReport Report = new("compile", 1, [], null);
+
+        public List<string> RepositoryPaths { get; } = [];
+
+        public Task<RecipeDiscoveryReport?> DiscoverAsync(
+            TransformationPlan plan,
+            string repositoryPath,
+            TransformationValidationResult validation,
+            CancellationToken cancellationToken = default)
+        {
+            RepositoryPaths.Add(repositoryPath);
+            return Task.FromResult<RecipeDiscoveryReport?>(Report);
+        }
     }
 
     private static string CreateTemporaryDirectory()

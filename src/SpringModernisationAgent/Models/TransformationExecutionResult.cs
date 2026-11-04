@@ -51,4 +51,11 @@ public sealed record TransformationExecutionResult(
     /// longer supports, found deterministically in the assessed source.
     /// </summary>
     public IReadOnlyList<string> UnsupportedLibraries { get; init; } = [];
+
+    /// <summary>
+    /// Recipes that might replace work the route's recipes left, measured on
+    /// a throwaway copy; null when discovery was off or validation passed.
+    /// Suggestions only: never applied.
+    /// </summary>
+    public RecipeDiscoveryReport? RecipeDiscovery { get; init; }
 }

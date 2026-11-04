@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SpringModernisationAgent.Build;
 using SpringModernisationAgent.Models;
+using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Remediation;
 using SpringModernisationAgent.Reporting;
 using SpringModernisationAgent.Transformation;
@@ -372,6 +373,12 @@ public sealed class TransformCommand
                 mavenProcessRunner,
                 progress);
 
+        var recipeDiscovery =
+            CreateRecipeDiscovery(
+                openRewriteRunner,
+                mavenProcessRunner,
+                progress);
+
         IOpenRewriteExecutionCoordinator executionCoordinator =
             new OpenRewriteExecutionCoordinator(
                 workspaceProvider,
@@ -381,12 +388,55 @@ public sealed class TransformCommand
                 transformationValidator,
                 patchRecorder,
                 remediationLoop,
-                progress);
+                progress,
+                recipeDiscovery);
 
         return new MigrationWaveExecutor(
             wavePlanner,
             repositorySelector,
             executionCoordinator);
+    }
+
+    /// <summary>
+    /// Recipe discovery is deterministic and changes nothing, so it runs
+    /// unless MIGRATION_RECIPE_DISCOVERY is "disabled". JARs are cached in
+    /// MIGRATION_RECIPE_CACHE, or a folder under the system temp directory.
+    /// </summary>
+    private static IRecipeDiscovery? CreateRecipeDiscovery(
+        IOpenRewriteRunner openRewriteRunner,
+        IMavenProcessRunner mavenProcessRunner,
+        IMigrationProgress progress)
+    {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("MIGRATION_RECIPE_DISCOVERY"),
+                "disabled",
+                StringComparison.Ordinal))
+        {
+            Console.WriteLine("Recipe discovery: disabled for this run.");
+            return null;
+        }
+
+        var cache = Environment.GetEnvironmentVariable("MIGRATION_RECIPE_CACHE");
+
+        if (string.IsNullOrWhiteSpace(cache))
+        {
+            cache = Path.Combine(Path.GetTempPath(), "spring-modernisation-recipe-cache");
+        }
+
+        var sources = RecipeSources.Load(
+            Path.Combine(AppContext.BaseDirectory, RecipeSources.DefaultRelativePath));
+
+        Console.WriteLine(
+            $"Recipe discovery: enabled ({sources.Modules.Count} modules indexed on first use; " +
+            $"at most {RecipeDiscovery.MaxMeasured} candidates measured per repository).");
+
+        return new RecipeDiscovery(
+            new MavenCentralRecipeCatalogProvider(
+                sources,
+                new MavenCentralJarCache(cache, new HttpClient { Timeout = TimeSpan.FromMinutes(2) })),
+            openRewriteRunner,
+            mavenProcessRunner,
+            progress);
     }
 
     /// <summary>

@@ -302,12 +302,26 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
     4. `sqlTypes()` is not migrated to `getSqlType()`.
 
     Bugs 1 and 3 suggest the recipe assumes a `BigDecimal` type instead of reading the class.
-- [ ] **Measure, in the pipeline.**
-  - For at most 3 candidates per repository: run on a throwaway copy, then compile.
-  - **Compare error sets, not counts**, keyed by file and message: R6's 12 → 13 hides 1 fixed and 3 new.
-  - A candidate is suitable only if it removes at least one error and adds none. Otherwise report what it removed and added, so nobody re-tries it by hand.
-  - `unverified` if it can't run (for example, it needs a newer core).
-- [ ] **Report.** A "Recipe candidates" section in the results document and a PR section, "Possible recipes for the remaining errors (suggestions, not applied)". Suggestions are counted in the ledger later (8.10).
+- [x] **Measure, in the pipeline** (`RecipeDiscovery`, `CompileErrorDiff`).
+  - It runs after OpenRewrite's validation and before remediation, on the code the route left.
+  - For at most 3 not-run candidates per repository: copy the workspace (without `target/`), run the candidate there, compile, then delete the copy. The workspace is never touched.
+  - **Error sets, not counts:** errors are keyed by file from `src/` on plus message, symbol and location, without line numbers, and counted per occurrence.
+  - Verdicts:
+    - **suitable**: removes at least one error and adds none;
+    - **unsuitable**: says what it removed and added;
+    - **unverified**: failed to run, the build failed with no source errors (for example a broken `pom.xml`), the failure isn't in `compile`, or it's over the cap;
+    - **already ran**: reported only.
+  - Its own failures are recorded in the report and never change the migration.
+  - Workflow input `recipe-discovery` defaults to on (`MIGRATION_RECIPE_DISCOVERY`). JARs are cached in `MIGRATION_RECIPE_CACHE` or the system temp directory.
+  - On the real probe #5 → #6 errors the comparison gives **3 removed, 4 added, 9 unchanged**, more exact than reading the logs (the "not abstract" error changed method).
+- [x] **Report:**
+  - the job summary has a candidates table per repository;
+  - the PR has "Possible recipes for the remaining errors (suggestions, not applied)": per candidate, its verdict and effect, what it would fix if suitable or what it adds if not, plus "Already in the route, and these errors remain: …";
+  - the results document has "Recipe candidates (suggestions, not applied)".
+
+  Suggestions are counted in the ledger later (8.10).
+- Tests: 9 discovery tests (each verdict, the workspace untouched and the copy removed, an index that can't load), 3 comparison tests, 4 rendering tests and 2 coordinator wiring tests. 606 pass.
+- [ ] Confirm in CI: one transform run with recipe discovery on and remediation **off** (no AI tokens). It should show `MigrateUserType` as ❌ unsuitable for orders-service in the job summary and the PR.
 - Never: the pipeline applies a suggested recipe, or changes a route, by itself.
 
 ### 8.2 Behaviour contract v1 (design §3)

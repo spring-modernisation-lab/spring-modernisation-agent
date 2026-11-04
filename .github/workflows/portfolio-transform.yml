@@ -20,6 +20,12 @@ on:
           repositories that passed or need a decision (never merged)
         type: boolean
         default: false
+      recipe-discovery:
+        description: >-
+          Look for OpenRewrite recipes that could fix what the route's recipes
+          left, and measure them on a throwaway copy (no AI; suggestions only)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -228,6 +234,7 @@ jobs:
           # Remediation changes code, so it is off unless explicitly chosen.
           MIGRATION_REMEDIATION: ${{ (inputs.remediation && steps.azure_login.outcome == 'success') && 'enabled' || 'disabled' }}
           MIGRATION_REMEDIATION_MAX_ATTEMPTS: ${{ inputs.remediation-max-attempts }}
+          MIGRATION_RECIPE_DISCOVERY: ${{ inputs.recipe-discovery && 'enabled' || 'disabled' }}
           FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
           FOUNDRY_MODEL: ${{ vars.FOUNDRY_MODEL }}
           FOUNDRY_AUTH_MODE: AzureCli

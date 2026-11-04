@@ -79,7 +79,50 @@ public static class TransformationSummaryWriter
             }
         }
 
+        foreach (var result in results.Where(result => result.RecipeDiscovery is not null))
+        {
+            AppendRecipeDiscovery(markdown, result.Transformation.RepositoryName, result.RecipeDiscovery!);
+        }
+
         return markdown.ToString();
+    }
+
+    private static void AppendRecipeDiscovery(
+        StringBuilder markdown,
+        string repository,
+        RecipeDiscoveryReport discovery)
+    {
+        markdown.AppendLine();
+        markdown.AppendLine($"### {repository}: recipe candidates");
+        markdown.AppendLine();
+
+        if (discovery.Error is not null)
+        {
+            markdown.AppendLine($"Recipe discovery could not run: {discovery.Error}");
+            return;
+        }
+
+        if (discovery.Suggestions.Count == 0)
+        {
+            markdown.AppendLine(
+                $"No indexed recipe matched the {Plural(discovery.Errors, "problem")} left in `{discovery.FailedCheck}`.");
+            return;
+        }
+
+        markdown.AppendLine("Suggestions only, measured on a throwaway copy; nothing here was applied.");
+        markdown.AppendLine();
+        markdown.AppendLine("| Recipe | Module | Matched in | Verdict | Effect |");
+        markdown.AppendLine("|---|---|---|---|---|");
+
+        foreach (var suggestion in discovery.Suggestions)
+        {
+            markdown.AppendLine(Row(
+                $"`{RecipeDiscoveryText.ShortName(suggestion.Recipe)}`",
+                suggestion.Coordinates,
+                RecipeDiscoveryText.Files(suggestion),
+                RecipeDiscoveryText.Verdict(suggestion.Verdict),
+                RecipeDiscoveryText.Effect(suggestion)));
+        }
     }
 
     private static string DescribeValidation(

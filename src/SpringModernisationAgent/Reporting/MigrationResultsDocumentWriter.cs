@@ -227,6 +227,39 @@ public sealed class MigrationResultsDocumentWriter
         body.Append(CreateTable(rows));
     }
 
+    /// <summary>Recipe candidates for what the route left: deterministic evidence, never applied.</summary>
+    private static void AddRecipeDiscovery(
+        Body body,
+        RecipeDiscoveryReport discovery)
+    {
+        AddHeading(body, "Recipe candidates (suggestions, not applied)", 3);
+
+        if (discovery.Error is not null)
+        {
+            AddParagraph(body, $"Recipe discovery could not run: {discovery.Error}");
+            return;
+        }
+
+        if (discovery.Suggestions.Count == 0)
+        {
+            AddParagraph(body, $"No indexed OpenRewrite recipe matched the problems left in '{discovery.FailedCheck}'.");
+            return;
+        }
+
+        AddParagraph(
+            body,
+            $"The pipeline matched the problems left in '{discovery.FailedCheck}' against its index of OpenRewrite " +
+            "recipes and measured the best candidates on a throwaway copy of the workspace.");
+
+        foreach (var suggestion in discovery.Suggestions)
+        {
+            AddBullet(
+                body,
+                $"{suggestion.Recipe} ({suggestion.Coordinates}), matched in {RecipeDiscoveryText.Files(suggestion)}: " +
+                $"{RecipeDiscoveryText.Verdict(suggestion.Verdict)}, {RecipeDiscoveryText.Effect(suggestion)}.");
+        }
+    }
+
     private static void AddRepositoryDetails(
         Body body,
         IReadOnlyList<RepositoryAssessment> repositories,
@@ -254,6 +287,11 @@ public sealed class MigrationResultsDocumentWriter
                     out var result))
             {
                 AddExecutionEvidence(body, result);
+
+                if (result.RecipeDiscovery is { } discovery)
+                {
+                    AddRecipeDiscovery(body, discovery);
+                }
             }
             else
             {
