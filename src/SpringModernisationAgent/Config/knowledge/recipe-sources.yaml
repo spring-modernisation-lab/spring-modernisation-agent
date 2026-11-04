@@ -1,0 +1,38 @@
+# Recipe modules indexed for recipe discovery (docs/system-design.md §5.1).
+#
+# Every module is pinned. Roles:
+#   core      - loaded by the pinned rewrite-maven-plugin itself (6.46.1 loads
+#               rewrite 8.89.0); pipeline recipes in Config/recipes build on it.
+#   route     - a recipe module a route in Config/spring.yaml runs.
+#   candidate - not run by any route; searched for recipes that could replace
+#               AI work. A candidate is only ever suggested, never applied.
+#
+# coreVersion is the OpenRewrite core the module declares (its rewrite-bom).
+# A module built for a newer core than the plugin loads may still work
+# (rewrite-spring 6.37.1 declares 8.90.2 and runs on 8.89.0); the dry run
+# decides, so a mismatch is a warning, not a block.
+
+pluginCoreVersion: "8.89.0"
+
+modules:
+  - coordinates: "org.openrewrite:rewrite-java:8.89.0"
+    role: core
+    coreVersion: "8.89.0"
+
+  - coordinates: "org.openrewrite.recipe:rewrite-spring:6.37.1"
+    role: route
+    coreVersion: "8.90.2"
+
+  - coordinates: "org.openrewrite.recipe:rewrite-migrate-java:3.42.1"
+    role: route
+    coreVersion: "8.90.2"
+
+  # Both are runtime dependencies of rewrite-spring 6.37.1, so recipes the
+  # Boot upgrade reaches in them already run; the rest are candidates.
+  - coordinates: "org.openrewrite.recipe:rewrite-hibernate:2.25.0"
+    role: candidate
+    coreVersion: "8.89.0"
+
+  - coordinates: "org.openrewrite.recipe:rewrite-apache:2.30.0"
+    role: candidate
+    coreVersion: "8.89.0"

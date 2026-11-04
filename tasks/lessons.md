@@ -16,7 +16,7 @@ Rules learned while building and driving this pipeline. Each lesson names the ru
 ## Recipes
 
 13. **When the AI makes the same fix twice, look for a recipe.** T3 (`javax.servlet` names in strings) was fixed by hand by the AI in R14, R20, R21 and R23 and broken in R24. OpenRewrite had the building block (`ChangePackageInStringLiteral`) in the core version we already pinned. We had designed T3 as AI work, pinned the recipes in run 1 and never looked again. Recipe discovery (Phase 8.1b) now looks every run.
-14. **Read the recipe's source before relying on its name.** `ChangePackageInStringLiteral` keeps the rest of each name (`.http` stays), and the ready-made `JavaxRuntimeTypeNamesToJakarta` is not in the pinned version. Both facts came from the pinned JARs themselves, not from documentation.
+14. **Read the recipe's source before relying on its name.** `ChangePackageInStringLiteral` keeps the rest of each name (`.http` stays). The ready-made `JavaxRuntimeTypeNamesToJakarta`, which the documentation site describes, is in no released open-source module, including the latest releases, which are the versions we pin. Both facts came from the JARs themselves, not from the documentation.
 
 ## The Remediation Agent
 

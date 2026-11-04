@@ -234,7 +234,7 @@ Design: [`docs/system-design.md`](../docs/system-design.md). §2 explains why th
 
 - [x] `lab.jakarta.ServletStringLiterals` in `Config/recipes/lab-recipes.yml`: a declarative recipe built from the core `org.openrewrite.java.ChangePackageInStringLiteral` (`javax.servlet` → `jakarta.servlet`).
   - Its source in rewrite-java 8.89.0, the version our pinned plugin 6.46.1 loads, was read before choosing it. It replaces the package prefix and keeps the rest of the name, so `.http.HttpServletRequest` stays `.http`.
-  - The ready-made `JavaxRuntimeTypeNamesToJakarta` was considered and rejected: it isn't in the pinned rewrite-migrate-java 3.42.1.
+  - The ready-made `JavaxRuntimeTypeNamesToJakarta`, which the documentation site describes, isn't in any released module: not in rewrite-migrate-java 3.42.1 or rewrite-spring 6.37.1 (both the latest releases), nor in rewrite-apache or rewrite-hibernate.
 - [x] **Pipeline recipes:** a route recipe may name a `configuration` file under `Config/` instead of an artifact.
   - It's pinned by the plugin version, because it uses only core recipes.
   - The runner passes it with `-Drewrite.configLocation`, so it is never written into the repository or a patch.
@@ -259,11 +259,20 @@ Design: [`docs/system-design.md`](../docs/system-design.md). §2 explains why th
 
 Why: T3 had a recipe building block all along, and nobody looked. Each step below is verified on recorded runs before CI.
 
-- [ ] **Index.**
-  - `Config/knowledge/recipe-sources.yaml`: the modules to index, each pinned, marked `route` (in use) or `candidate`.
-  - `RecipeCatalog` reads each JAR's `recipes.csv` and declarative YAML: name, description, options, the types and packages each recipe touches, and the module's required core version.
-  - JARs are downloaded from Maven Central into a hash-checked cache.
-  - Verify: indexing the pinned modules finds `ChangePackageInStringLiteral` mentioning `javax.servlet` in the Faces recipes, and lists `UpgradeSpringBoot_3_5`.
+- [x] **Index.**
+  - `Config/knowledge/recipe-sources.yaml` lists five pinned modules: core `rewrite-java` 8.89.0; route modules `rewrite-spring` 6.37.1 and `rewrite-migrate-java` 3.42.1 (both the latest releases); candidate modules `rewrite-hibernate` 2.25.0 and `rewrite-apache` 2.30.0. Each records the core version it declares.
+  - `RecipeCatalog` reads each JAR's `recipes.csv` (every recipe, including Java-written ones) and its declarative YAML (children and option values; preconditions are filters and don't count).
+  - `ReachableFrom` gives the recipes a route already runs.
+  - `MavenCentralJarCache` downloads each JAR once and keeps it only if it matches Maven Central's published SHA-1.
+- Verified against the real modules:
+  - **1,058 recipes** indexed, with 0 warnings;
+  - **635 already run** by the application route;
+  - `UpgradeApacheHttpClient_5` (T2) and `WebSecurityConfigurerAdapter` (T4) are already run, so the remaining errors are AI port work;
+  - **`org.openrewrite.hibernate.MigrateUserType` (T1) is not run and is a real candidate**.
+- Findings along the way:
+  - `rewrite-spring` 6.37.1 ships a YAML file that strict parsers reject (quoted strings wrapped into column 0). It's repaired on read, otherwise 1 file of property-rename recipes would be lost.
+  - An independent line-by-line walk found 592 recipes in the tree, all of them in the index. The index's 43 extra are real children (for example of `UpgradeSpringBoot_2_0`) that the simple walk missed.
+  - 9 unit tests: CSV quoting, options, preconditions, cross-module trees, the column-0 repair, a bad document, the sources file, and SHA-1 refusal. 583 tests pass.
 - [ ] **Deterministic match.** Extract types, members and packages from compile errors and failing tests, then look them up.
   - Verify on R24's recorded diagnostics (the 12 compile errors): every candidate is real; report what is found for T1, T2 and T4.
 - [ ] **AI ranking.**
