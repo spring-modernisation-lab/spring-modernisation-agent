@@ -20,4 +20,11 @@ public sealed record BehaviourReport(
 {
     /// <summary>True only when both records exist and every difference is allowed.</summary>
     public bool Holds => Comparison?.Matches == true;
+
+    /// <summary>
+    /// Differences a behaviour signature explains (item → <c>BS-…</c>): the
+    /// platform's doing, decisions for a person. They still count against
+    /// <see cref="Holds"/> until a decision allows them.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Explained { get; init; } = new Dictionary<string, string>();
 }

@@ -18,7 +18,7 @@ public class TransformationSummaryWriterTests
         ]);
 
         Assert.Contains("## Migration wave results", markdown);
-        Assert.Contains("| Repository | OpenRewrite | Validation | Remediation | Outcome |", markdown);
+        Assert.Contains("| Repository | OpenRewrite | Validation | AI ports | Outcome |", markdown);
         Assert.Contains("| platform-parent | 2 files changed | Passed | not enabled | ✅ Succeeded |", markdown);
         Assert.Contains("| orders-service | 7 files changed | Failed (compile) | not enabled | ❌ Failed |", markdown);
     }
@@ -74,7 +74,7 @@ public class TransformationSummaryWriterTests
         Assert.Contains("| orders-service | 7 files changed | Failed (compile) | 1 reverted (2 attempts) | ⚠️ Needs decision |", markdown);
         Assert.Contains("### orders-service: AI ports", markdown);
         Assert.Contains(
-            "| `M-HTTPCLIENT-5-POOL` Apache HttpClient 5: pool and connection settings | InventoryClientConfiguration.java | 1, 2 | ↩️ Reverted: the guardrails rejected it | 1 unchanged. not checked: B-BEAN-production-HttpClient.maxTotal |",
+            "| `M-HTTPCLIENT-5-POOL` Apache HttpClient 5: pool and connection settings | InventoryClientConfiguration.java | 1, 2 | ↩️ Reverted: the guardrails rejected it | 1 unchanged. 1 not checked (their application did not start) |",
             markdown);
         Assert.Contains("| # | Port | Check | Decision | Edits | Validation after | Kept | Tool calls | Tokens in/out |", markdown);
 

@@ -79,7 +79,7 @@ public static class PullRequestContentBuilder
         AppendUnsupportedLibraries(body, result, libraries);
         AppendOutcome(body, result);
         AppendBehaviour(body, result.Behaviour);
-        AppendFlags(body, flags);
+        AppendFlags(body, flags, result.Remediation);
         AppendRecipeDiscovery(body, result.RecipeDiscovery);
         AppendChanges(body, result);
 
@@ -264,7 +264,8 @@ public static class PullRequestContentBuilder
 
     private static void AppendFlags(
         StringBuilder body,
-        IReadOnlyList<ReviewFlag> flags)
+        IReadOnlyList<ReviewFlag> flags,
+        RemediationReport? remediation)
     {
         body.AppendLine($"## Review flags ({flags.Count})");
         body.AppendLine();
@@ -285,10 +286,26 @@ public static class PullRequestContentBuilder
                 _ => "CI configuration"
             };
 
-            body.AppendLine($"- **{label}** `{flag.Path}` ({flag.Stage}): {flag.Detail}");
+            body.AppendLine($"- **{label}** `{flag.Path}` ({flag.Stage}): {flag.Detail}{Checked(flag, remediation)}");
         }
 
         body.AppendLine();
+    }
+
+    /// <summary>
+    /// What the behaviour contract proved about the port behind a flag. A
+    /// flag is never hidden: the probe does not read everything a port keeps.
+    /// </summary>
+    private static string Checked(
+        ReviewFlag flag,
+        RemediationReport? remediation)
+    {
+        var mapping = remediation?.Attempts.FirstOrDefault(attempt => attempt.Patch?.Stage == flag.Stage)?.Task;
+        var task = remediation?.Tasks.FirstOrDefault(task => task.Mapping == mapping);
+
+        return task is { ObligationsKept.Count: > 0, ObligationsBroken.Count: 0 }
+            ? $" The behaviour contract checked this port: {task.ObligationsKept.Count} recorded behaviours are unchanged; anything the probe does not record still needs your review."
+            : string.Empty;
     }
 
     /// <summary>What the migrated application does differently from the Boot 2.7 one (the behaviour contract).</summary>
@@ -312,7 +329,7 @@ public static class PullRequestContentBuilder
         if (behaviour.Comparison is { } comparison && comparison.Differences.Count > 0)
         {
             body.AppendLine();
-            body.Append(BehaviourText.Differences(comparison));
+            body.Append(BehaviourText.Differences(comparison, behaviour.Explained));
             body.AppendLine();
             body.AppendLine(
                 "Each difference needs a person: fix it, or accept it with a decision record. A difference can be an " +

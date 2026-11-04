@@ -101,7 +101,7 @@ flowchart TD
 
 Each repository ends in one of four states: **Succeeded**, **Needs decision**, **Failed** or **Not run**. Only *Succeeded* opens the next wave. A repository that still uses a library Spring Boot 3 dropped (for example Ehcache 2) is *Needs decision*, whatever Maven says.
 
-## Key findings (CI runs 11–24)
+## Key findings (CI runs 11–27)
 
 The demo repository, `orders-service`, has six seeded traps (T1–T6, catalogued in [`tasks/demo-traps.md`](tasks/demo-traps.md)).
 
@@ -122,6 +122,10 @@ The demo repository, `orders-service`, has six seeded traps (T1–T6, catalogued
 A green build also hid real losses: in run 14, a `POST` to `/api/orders/` (trailing slash) bypassed the operator-only rule, and the HTTP connection time-to-live was dropped, in runs 14 and 24 alike.
 
 **4. Adding a rule per workaround never converged; facts did.** Each new rule held for one run. What ended the Ehcache series was an invariant the AI can't argue with: it may not edit `pom.xml`, so if the POM still declares an unsupported library, a green build cannot mean it was migrated. The repository is "Needs decision", whatever Maven says. Every rule change is now checked by replaying the real proposals from past runs, both ways: the bad ones must be rejected and the good ones still accepted.
+
+**5. Recording the behaviour, then giving the AI one scoped task at a time, worked.** The redesign (Phase 8) records what the Boot 2.7 application does before anything changes: whether it starts, who may call each endpoint, settings, HTTP client and cache values. Then each known API move becomes one task with its files, its errors and the behaviour it must keep.
+- **Run 26 (the old loop, the new contract):** the contract caught the HTTP connection time-to-live dropped for the third time, which Maven and the tests could not see.
+- **Run 27 (scoped ports):** all three ports (security, Hibernate, HttpClient) were accepted on the first attempt, each changing only its own files. The time-to-live was kept, and the contract confirmed it. The H2 console stayed exempt from security. The two remaining failures were exactly the two decisions, Ehcache 2 and the trailing slash, and neither reached the AI. It was also the cheapest run so far: 3 AI calls and 108k input tokens, against 170k in run 24.
 
 **5. Recurring AI fixes should become recipes, but only after measuring them.** The AI fixed T3 (`javax.servlet` names in strings) by hand in four runs and broke it in a fifth. An OpenRewrite recipe now does it deterministically, producing a file byte-identical to the AI's correct fixes. Recipe discovery then found an existing recipe for T1 (`MigrateUserType`), but measuring it showed it fixes 3 errors and introduces 4. A recipe that looks like a perfect match still has to be measured.
 

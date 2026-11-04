@@ -21,7 +21,7 @@ public static class TransformationSummaryWriter
 
         markdown.AppendLine("## Migration wave results");
         markdown.AppendLine();
-        markdown.AppendLine("| Repository | OpenRewrite | Validation | Remediation | Outcome |");
+        markdown.AppendLine("| Repository | OpenRewrite | Validation | AI ports | Outcome |");
         markdown.AppendLine("|---|---|---|---|---|");
 
         foreach (var result in results)
@@ -93,7 +93,7 @@ public static class TransformationSummaryWriter
             if (result.Behaviour!.Comparison is { } comparison && comparison.Differences.Count > 0)
             {
                 markdown.AppendLine();
-                markdown.Append(BehaviourText.Differences(comparison));
+                markdown.Append(BehaviourText.Differences(comparison, result.Behaviour.Explained));
             }
         }
 

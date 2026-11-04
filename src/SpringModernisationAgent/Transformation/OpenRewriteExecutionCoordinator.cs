@@ -290,6 +290,17 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                     validationResult,
                     cancellationToken);
 
+            if (behaviour?.Comparison is { } comparison && _problemKnowledge is not null)
+            {
+                behaviour = behaviour with
+                {
+                    Explained = comparison.Differences
+                        .Select(difference => (difference.Item, Signature: _problemKnowledge.Explain(difference)))
+                        .Where(entry => entry.Signature is not null)
+                        .ToDictionary(entry => entry.Item, entry => entry.Signature!.Id)
+                };
+            }
+
             var result = new TransformationExecutionResult(
                 Transformation: transformationResult,
                 Validation: validationResult)

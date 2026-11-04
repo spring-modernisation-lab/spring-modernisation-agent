@@ -1,6 +1,6 @@
 # System design: the Spring modernisation pipeline as an agent-legible system
 
-Status: design, revised 4 November 2026 after CI runs 11–24. Every principle here answers something that actually happened in those runs (see §15).
+Status: design, revised 4 November 2026 after CI runs 11–27; §3 and §4.1 are built and proven in CI (runs 26 and 27). Every principle here answers something that actually happened in those runs (see §15).
 
 §2 explains why the first design kept going in circles; §3–§5 are the redesign; §6 onwards are the supporting parts. Plans that implement it are in `tasks/todo.md` (Phase 8).
 
@@ -20,7 +20,7 @@ Read code only after you know which layer (§6) and which identifier (§7) you a
 
 Each clause has a single owner:
 - **Deterministic tools:** OpenRewrite and our own recipes.
-- **A bounded AI:** the Remediation Agent, given one scoped port at a time.
+- **A bounded AI:** the porting agent, given one scoped port at a time.
 - **The behaviour contract:** recorded by the pipeline on the Boot 2.7 baseline, never written by the AI.
 - **Facts:** the catalogue, the BOM comparison and the contract differences.
 - **A person:** decisions, made in the draft PR.
@@ -90,6 +90,10 @@ Which items to record is set per route in configuration: `Config/knowledge/behav
 | `changed` | The value differs | **Blocks success.** Becomes a contract problem (§4) unless a decision record allows it |
 | `unavailable` | The probe couldn't read the item after migration (for example, the bean was removed) | **Blocks success**, as `changed` does: unknown is not "same" |
 | `allowed` | It differs, and a decision record says so (`D-…`) | Nothing; shown in the PR |
+
+Two rules keep the comparison readable (both from run 26):
+- **An application that no longer starts is one difference, not dozens.** Its profile's unreadable items are counted under its `B-CTX-…` row as not checked; values that were read and differ are still listed.
+- **Known platform changes are named.** A difference that a behaviour signature explains (`behaviour-signatures.yaml`, for example Spring 6 no longer matching a trailing slash) is labelled as a platform change. It still blocks success until a decision allows it, but it is never held against a port (§4.1).
 
 The contract is evidence about behaviour, not a proof: it covers only what is recorded. Its value is that it turns the losses the runs actually found into something Maven-level and deterministic, and makes every new probe add to the coverage of every later run.
 
@@ -375,6 +379,8 @@ Guidelines:
 | R22 | Correct decision; a known fix left out | §4: problems are worked one at a time, so independent fixes don't wait on a decision |
 | R23 | "Fixed" with a parser-based fake cache; a guardrail bug | §4 and `I-UNSUPPORTED-NEVER-SUCCEEDS`; §10.3: replay found the bug |
 | R24 | Decision correct; the carried servlet fix still failed; TTL dropped again | §4.1: rejected for not removing its evidence, then reverted; §5: T3 becomes a recipe; §3: `B-BEAN-…TimeToLive` |
+| R26 | The contract, in the pipeline, caught the TTL dropped a third time; production not starting made 36 rows of noise | §3.3: a stopped context is one difference; §4.1: obligations |
+| R27 | Scoped ports: T1, T2 and T4 accepted on the first attempt, TTL kept and confirmed; T5 and T6 left as decisions | §4.1 as built |
 | All | One open loop chasing green; knowledge re-derived each run | §2–§5 |
 
 ## 16. Sizing the migration effort (T-shirt sizes)

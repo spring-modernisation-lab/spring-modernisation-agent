@@ -129,7 +129,10 @@ public static class PortText
 
         if (task.ObligationsUnchecked.Count > 0)
         {
-            parts.Add($"not checked: {string.Join("; ", task.ObligationsUnchecked)}");
+            // Items could not be read because their application did not start; anything else is a reason.
+            parts.Add(task.ObligationsUnchecked.All(item => item.StartsWith("B-", StringComparison.Ordinal))
+                ? $"{task.ObligationsUnchecked.Count} not checked (their application did not start)"
+                : string.Join("; ", task.ObligationsUnchecked));
         }
 
         return parts.Count == 0 ? "-" : string.Join(". ", parts);

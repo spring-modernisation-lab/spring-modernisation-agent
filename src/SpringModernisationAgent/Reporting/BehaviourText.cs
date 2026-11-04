@@ -24,7 +24,10 @@ public static class BehaviourText
             ? $"**Holds**: {comparison.Same} recorded behaviours are unchanged" +
               (comparison.Differences.Count > 0 ? $"; {comparison.Differences.Count} differences are allowed by decisions." : ".")
             : $"**Does not hold**: {comparison.Differences.Count} differ from the Boot 2.7 application; {comparison.Same} are unchanged." +
-              UncheckedSentence(comparison);
+              UncheckedSentence(comparison) +
+              (report.Explained.Count == 0
+                  ? ""
+                  : $" {report.Explained.Count} of the differences are known platform changes: decisions for a person, not faults in the migration.");
     }
 
     /// <summary>" N more could not be checked …", or empty when every item was read.</summary>
@@ -53,8 +56,10 @@ public static class BehaviourText
     }
 
     /// <summary>The differences as a Markdown table (empty when there are none).</summary>
+    /// <param name="explained">Item → the behaviour signature that explains it, if any.</param>
     public static string Differences(
-        ContractComparison comparison)
+        ContractComparison comparison,
+        IReadOnlyDictionary<string, string>? explained = null)
     {
         ArgumentNullException.ThrowIfNull(comparison);
 
@@ -71,7 +76,7 @@ public static class BehaviourText
         {
             markdown.AppendLine(
                 $"| `{Cell(difference.Item)}` | {Cell(difference.Before)} | {Cell(difference.After ?? "(not recorded)")} | " +
-                $"{Cell(Status(difference))} |");
+                $"{Cell(Status(difference) + (explained?.GetValueOrDefault(difference.Item) is { } signature ? $": a platform change, a decision ({signature})" : ""))} |");
         }
 
         return markdown.ToString();

@@ -242,6 +242,30 @@ public class PullRequestContentBuilderTests
         };
     }
 
+    [Fact]
+    public void Build_AFlagOnAPortTheContractChecked_SaysWhatWasProvenAndStillAsksForReview()
+    {
+        // Run 27: "Removed code" on the HttpClient port, whose six client values the contract proved unchanged.
+        var result = CreateResult(passed: true, RemediationOutcome.Fixed);
+        var patch = new PatchArtifact("04-port-m-security-6-filterchain", "patches/orders-service/04.patch", "a", ["x"]);
+        result = result with
+        {
+            Remediation = result.Remediation! with
+            {
+                Attempts = [result.Remediation.Attempts[0] with { Patch = patch }],
+                Tasks = [result.Remediation.Tasks[0] with { ObligationsKept = ["a", "b", "c", "d", "e", "f"] }]
+            }
+        };
+
+        var body = PullRequestContentBuilder.Build(
+            CreatePlan(),
+            result,
+            [new ReviewFlag(ReviewFlagKind.CallRemoved, "04-port-m-security-6-filterchain", "src/main/java/a/A.java", "The AI removed calls.")],
+            analysis: null)!.Body;
+
+        Assert.Contains("The AI removed calls. The behaviour contract checked this port: 6 recorded behaviours are unchanged; anything the probe does not record still needs your review.", body);
+    }
+
     private static MigrationAnalysis CreateAnalysis() =>
         new(
             RepositoryName: "orders-service",

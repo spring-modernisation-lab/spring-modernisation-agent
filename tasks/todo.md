@@ -8,10 +8,10 @@ Show where AI adds real value in a framework upgrade, in one end-to-end demo:
 
 1. **Assess.** Deterministic estate analysis and waves; the AI writes the strategy (done).
 2. **Transform.** OpenRewrite migrates a repo, and the build **fails** on something the recipes don't cover (proved: 12 compile errors in 3 files).
-3. **Remediate.** The AI diagnoses the failure and proposes a bounded patch. C# applies it and re-runs Maven. The build goes green, or the AI explains why it can't fix it.
+3. **Port.** What the recipes left is classified from facts. Each known API move is one scoped task: the AI proposes changes to that task's files, and C# keeps them only if the task's errors are gone, nothing new fails and the behaviour recorded on Boot 2.7 is unchanged. Everything else goes to a person as a decision.
 4. **Hand over.** A preserved diff plus an AI-written reviewer summary that separates OpenRewrite's changes from the AI's, delivered as a draft PR.
 
-Closing message: *automation did what it reliably could; AI handled the long tail; Maven, not the AI, decided success.*
+Closing message: *automation did what it reliably could; AI handled the long tail one scoped task at a time; Maven and the recorded behaviour, not the AI, decided success.*
 
 ### Demo success criteria
 
@@ -20,11 +20,12 @@ Closing message: *automation did what it reliably could; AI handled the long tai
 - [x] At least one seeded case the AI **can't** or **shouldn't** fix is reported clearly and not "fixed" (run 22: T6 Ehcache 2 → `NeedsHumanDecision`, `[Needs decision]` draft PR). Since `e1850c2` this is also enforced by an invariant, not just the agent's judgement.
 - [x] The artifacts include: the OpenRewrite patch, the AI patch, the validation evidence for each attempt, and the reviewer summary (runs 20 onwards, plus draft PRs).
 - [x] The same outcome on repeated runs for the decision case: R22 and R24 both ended `NeedsDecision` in 2 attempts (R23's false "Fixed" is now impossible).
-- [ ] A `Succeeded` repository also matches its baseline behaviour contract (Phase 8.2), so green means the behaviour was kept, not just that the tests passed.
+- [ ] A `Succeeded` repository also matches its baseline behaviour contract (Phase 8.2), so green means the behaviour was kept, not just that the tests passed. Enforced since 8.2 (`I-CONTRACT-MATCHES`), and run 27's three ports kept every behaviour the probe reads. Not yet shown on a `Succeeded` repository with a contract: orders-service still needs its two decisions (8.8 decision records make that possible).
+- [x] The AI's work is scoped and kept only if it keeps behaviour (Phase 8.4, run 27: three ports accepted on the first attempt, the TTL kept and confirmed, T5 and T6 left as decisions).
 
 ### Out of scope for the demo (kept in the backlog)
 
-Multi-wave hand-off (merge, publish, re-assess), durable run store, cross-run persistence, parallel execution, automatic PR merge, and the production portal.
+Multi-wave hand-off (merge, publish, re-assess), durable run store, parallel execution, automatic PR merge, and the production portal. Cross-run persistence is designed (design §17.5) and planned as 8.13, after the demo.
 
 ---
 
@@ -206,7 +207,7 @@ Exposed to the model as Agent Framework function tools. All paths are relative, 
 
 ## Backlog: mechanical-only test edits (not for the demo)
 
-Today the Remediation Agent may not edit test sources at all; a test that needs changing is a human decision. For real estates, allow a narrow, deterministically checked exception:
+Today the porting agent may not edit test sources at all; a test that needs changing is a human decision. For real estates, allow a narrow, deterministically checked exception:
 
 - [ ] Accept an AI edit to `src/test/**` only if every changed line is an `import` or an annotation (e.g. `javax.*` → `jakarta.*`, `@MockBean` → `@MockitoBean`, JUnit 4 → 5 annotations).
 - [ ] Reject the whole proposal if a test edit touches a method body, an assertion, an expected value or test data; the reason tells the agent this is a human decision.
@@ -327,7 +328,7 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
   - Outcomes: orders-service Needs decision, platform-parent Succeeded.
 - Never: the pipeline applies a suggested recipe, or changes a route, by itself.
 
-### 8.2 Behaviour contract v1 (design §3)
+### 8.2 Behaviour contract v1 (design §3) (done)
 
 - [ ] Probe: a pipeline-owned JUnit 5 test plus its dependencies. It is added to the workspace's test classpath only during validation and excluded from every patch (like `target/`). It must compile against both Boot 2.7 and Boot 3.5.
 - [ ] Item kinds for v1, chosen because they are what the runs actually lost:
@@ -373,7 +374,7 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 - [x] **A context that no longer starts is one difference, not dozens** (from run 26). When a profile started on the baseline and doesn't now, its unreadable items are folded into the `B-CTX-…` row (`ContractDifference.Unchecked`). The reports say how many couldn't be checked. Values that were read and differ are still listed, and the verdict is unchanged. Run 26 re-compared: 42 rows → 6 (the TTL, the context with 36 unchecked under it, four trailing-slash 404s). 646 pass.
 - [ ] Later: probes for other repository kinds (a library with Spring configuration via a generated test application; parent POMs via the effective POM; plain libraries via characterisation tests). See design §3.
 
-### 8.3 Problem kinds and knowledge (design §4, §9.2) *(no CI)*
+### 8.3 Problem kinds and knowledge (design §4, §9.2) *(no CI)* (done)
 
 - [x] **`diagnostic-signatures.yaml`**: 7 signatures, ordered, first match wins: `knock-on`, `mechanical` (T3 → the recipe), `platform-dropped` (Ehcache 2, only if the repository uses it), `contract` (an HTTP status changed), and three `api-move`s. Each names the runs it was written from.
 - [x] **`api-mappings.yaml`**: `M-SECURITY-6-FILTERCHAIN`, `M-HIBERNATE-6-USERTYPE` and `M-HTTPCLIENT-5-POOL`, each with checked notes and what the port must keep. For example, the HttpClient notes say the TTL moves to `ConnectionConfig`, not `setValidateAfterInactivity` (R14, R24), and the Hibernate notes record that `MigrateUserType` is unsuitable (probe #6).
@@ -393,7 +394,7 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 - [ ] Move the behaviour-annotation and settings rules into `Config/knowledge/` (the catalogue is already there).
 - Verify: on the recorded diagnostics of R13–R24, every problem is classified; T3 → `K-MECHANICAL`, T1/T2/T4 → `K-API-MOVE`, T5 → `K-CONTRACT`, T6 → `K-PLATFORM-DROPPED`; nothing is `K-UNKNOWN`.
 
-### 8.4 Scoped ports replace the open loop (design §4.1)
+### 8.4 Scoped ports replace the open loop (design §4.1) (done, run 27)
 
 The AI gets one **task** (a known API move, its files, its evidence, its obligations), never the repository. A port is kept only if it is better and keeps its behaviour; otherwise it is reverted and goes to a person with the attempt attached. The AI still proposes every port's code: that is the demo.
 
@@ -537,7 +538,7 @@ Needed before 8.12's release-aware gate and refresh mode can work across runs: t
 
 Done: Phase 3 → 4.1–4.6 → CI runs → Phase 5.
 
-Next: **8.0 → 8.1 (done) → 8.1b (done) → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, 8.11 (sizing: the estimate half can start any time), 8.13 (persisted estate state) and 8.12 (releases, refreshes, cut-over; it needs 8.13), then 6 → 7. Each step is test-first and committed separately.
+Done: **8.0 → 8.1 → 8.1b → 8.3 → 8.2 → 8.4**. Run 27 tested the redesign as a whole: T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions. Next: **8.5** (one verdict, with reasons), then 8.8 (decision records, so a repository whose decisions are made can succeed with the contract matching). Then 8.6–8.10, 8.11 (sizing: the estimate half can start any time), 8.13 (persisted estate state) and 8.12 (releases, refreshes, cut-over; it needs 8.13), then 6 → 7. Each step is test-first and committed separately.
 
 8.3 comes before 8.2 because classification needs no JDK and can be verified on recorded runs straight away. The contract needs a probe workflow.
 
