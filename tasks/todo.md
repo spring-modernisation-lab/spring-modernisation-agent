@@ -247,7 +247,35 @@ Design: [`docs/system-design.md`](../docs/system-design.md). §2 explains why th
   - no other source or test contains a `javax.servlet` string.
 
   Tests cover the route order, the recipe file, the validator, the runner arguments, refusal of missing and outside files, and plan JSON (574 pass).
-- [ ] Confirm in CI with the **OpenRewrite probe** workflow (no AI, about 5 minutes): its `openrewrite.patch` must contain the three `jakarta.servlet` literals. Then T3 never reaches the AI in the next full run.
+- [x] Confirmed in CI: OpenRewrite probe #5 (`c752fc0`, 2m 21s, no AI).
+  - The recipe ran from `recipes/lab-recipes.yml` with no artifact.
+  - OpenRewrite reported "Changes have been made to …/ServletContainerCompatibilityCheck.java by: org.openrewrite.java.ChangePackageInStringLiteral: {oldPackageName=javax.servlet, newPackageName=jakarta.servlet}".
+  - The diff shows that file as `6 +++---`, its three literals and nothing else. OpenRewrite now changes 8 files (7 before).
+  - From the probe artifact, the resulting file is git blob `10ff5a0`, **byte-identical to the AI's correct fixes in R14, R20 and R23**. Every other file matches R24's OpenRewrite output exactly.
+  - The post-migration build fails with the same 12 compile errors as before (T1, T2, T4) and none about servlets, so what's left for the AI is the API ports.
+  - From the next full run, T3 never reaches the AI.
+
+### 8.1b Recipe discovery (design §5.1)
+
+Why: T3 had a recipe building block all along, and nobody looked. Each step below is verified on recorded runs before CI.
+
+- [ ] **Index.**
+  - `Config/knowledge/recipe-sources.yaml`: the modules to index, each pinned, marked `route` (in use) or `candidate`.
+  - `RecipeCatalog` reads each JAR's `recipes.csv` and declarative YAML: name, description, options, the types and packages each recipe touches, and the module's required core version.
+  - JARs are downloaded from Maven Central into a hash-checked cache.
+  - Verify: indexing the pinned modules finds `ChangePackageInStringLiteral` mentioning `javax.servlet` in the Faces recipes, and lists `UpgradeSpringBoot_3_5`.
+- [ ] **Deterministic match.** Extract types, members and packages from compile errors and failing tests, then look them up.
+  - Verify on R24's recorded diagnostics (the 12 compile errors): every candidate is real; report what is found for T1, T2 and T4.
+- [ ] **AI ranking.**
+  - One structured call per repository, given the errors and the index shortlist.
+  - Names not in the index are dropped.
+  - Verify with a fake model (an invented name is dropped), then once against the real model.
+- [ ] **Measure.**
+  - In the transform job, for at most 3 candidates per repository: `dryRun` on a throwaway copy, then compile.
+  - The result is "errors 12 → n, new 0", or `unverified` (for example, the module needs a newer core).
+  - Verify in the probe workflow first.
+- [ ] **Report.** A "Recipe candidates" section in the results document and a PR section, "Possible recipes for the remaining errors (suggestions, not applied)". Suggestions are counted in the ledger later (8.10).
+- Never: the pipeline applies a suggested recipe, or changes a route, by itself.
 
 ### 8.2 Behaviour contract v1 (design §3)
 
@@ -348,7 +376,7 @@ Design: [`docs/system-design.md`](../docs/system-design.md). §2 explains why th
 
 Done: Phase 3 → 4.1–4.6 → CI runs → Phase 5.
 
-Next: **8.0 → 8.1 → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, then 6 → 7. Each step is test-first and committed separately.
+Next: **8.0 → 8.1 (done) → 8.1b → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, then 6 → 7. Each step is test-first and committed separately.
 
 8.3 comes before 8.2 because classification needs no JDK and can be verified on recorded runs straight away. The contract needs a probe workflow.
 

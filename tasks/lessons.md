@@ -13,6 +13,11 @@ Rules learned while building and driving this pipeline. Each lesson names the ru
 3. **Normalisation steps in a checker are part of the checker, and need their own adversarial tests.** R23's bypass was not in the rule but in the pre-processing: stripping `<…>` as generics also deleted `ttl > 0 … age < max` and the anonymous classes between them. Patterns that delete text must only match what they claim to match.
 4. **The AI optimises for a green build, not for the intent.** Expect it to special-case tests (R16), drop behaviour (R21 removed `@Cacheable` and switched production caching off), or swap in a weaker substitute (R23's fallback cache). Write rules about what must not be lost (annotations, settings, libraries), not only about what must not be added.
 
+## Recipes
+
+13. **When the AI makes the same fix twice, look for a recipe.** T3 (`javax.servlet` names in strings) was fixed by hand by the AI in R14, R20, R21 and R23 and broken in R24. OpenRewrite had the building block (`ChangePackageInStringLiteral`) in the core version we already pinned. We had designed T3 as AI work, pinned the recipes in run 1 and never looked again. Recipe discovery (Phase 8.1b) now looks every run.
+14. **Read the recipe's source before relying on its name.** `ChangePackageInStringLiteral` keeps the rest of each name (`.http` stays), and the ready-made `JavaxRuntimeTypeNamesToJakarta` is not in the pinned version. Both facts came from the pinned JARs themselves, not from documentation.
+
 ## The Remediation Agent
 
 5. **Give it real facts instead of letting it guess.** `describe_class` ended three runs of guessed HttpClient 5 signatures (R13). Telling it up front which libraries are unsupported cut R22 to two attempts.

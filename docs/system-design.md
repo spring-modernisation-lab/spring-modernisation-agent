@@ -147,7 +147,21 @@ When a person accepts a scoped port in a draft PR, the work isn't finished until
 
 From then on, the problem's kind moves down the table: `K-UNKNOWN` → `K-API-MOVE` → `K-MECHANICAL`. **The AI's per-run share shrinks over time, and that share is the measure of progress.** The ledger (§10.4) reports it per trap and per kind.
 
-T3 is the first candidate. The AI fixed it correctly in four runs and broke it in the fifth, which is exactly the case for making it deterministic.
+T3 was the first: `lab.jakarta.ServletStringLiterals` (Phase 8.1). It produces, byte for byte, the file the AI produced in R14, R20 and R23, and the AI broke that file in R24.
+
+### 5.1 Recipe discovery: the front door to durable fixes
+
+T3 had a recipe building block all along; nobody looked. Recipe discovery makes the system look, every run, for each problem the route's recipes leave behind.
+
+1. **Recipe index (deterministic).** It's built from the recipe JARs: each JAR's `META-INF/rewrite/recipes.csv` (every recipe's name, description and options) and its declarative YAML (the types and packages each recipe touches).
+   - It covers the pinned modules plus candidate modules at pinned versions, listed in `Config/knowledge/recipe-sources.yaml`.
+   - It records each module's required OpenRewrite core version, because a module built for a newer core may not run on the pinned plugin.
+2. **Match (deterministic first).** Symbols are extracted from each remaining compile error or failing test (types, members, packages) and looked up in the index. Exact hits need no AI.
+3. **AI ranking (fuzzy cases only).** The AI sees the errors and a shortlist from the index, then ranks and explains the candidates. Any name it returns that isn't in the index is dropped, so invented recipe names can't get through.
+4. **Measure.** OpenRewrite's `dryRun` applies nothing, so each candidate is tried on a throwaway copy of the post-recipe tree, which is then rebuilt. The result is a measured fact ("compile errors 12 → 10, none new"), or `unverified`.
+5. **Report, never apply.** The results document and the PR list "Possible recipes for the remaining errors (suggestions, not applied)", each with its effect and source (index or AI). Adding a recipe to a route stays a reviewed commit with a probe run, as in 8.1. The ledger counts suggestions per problem.
+
+Candidates are judged by the same rule as an AI port: they remove failures, add none, and leave the contract the same. Recipes and the AI are measured on one scale.
 
 ## 6. The tower of abstractions
 
