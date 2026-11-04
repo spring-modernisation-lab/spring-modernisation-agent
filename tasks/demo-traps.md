@@ -92,6 +92,18 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
   - The failed production context first showed as 36 separate "unavailable" rows; they are now folded under its context row.
   - Not covered by the contract: the H2 console went from ignored by security to `permitAll` with frame options off. It isn't a Spring MVC endpoint, so nothing records it.
   - Takeaway for 8.4: a port of T4 that carries the obligation "`connectionTimeToLive` stays 30000ms" would have been reverted and repaired, not accepted.
+- **Run 27** (`8837c62`, the first run with scoped ports, 8.4): **orders-service `Needs decision`, for exactly the right reasons.** platform-parent `Succeeded`.
+  - Three tasks, each accepted on its first attempt, each changing only its own files:
+    - T1, security (69 lines): the filter chain and users ported, and the H2 console still ignored through a `WebSecurityCustomizer`, exactly as the mapping note says. Run 26 had changed it to `permitAll`.
+    - T2, Hibernate (43 lines).
+    - T4, HttpClient (19 lines): **the TTL kept for the first time**, as `ConnectionConfig.setTimeToLive(30s)` on the connection manager, the move the mapping note describes. The contract gate confirmed all 6 default-profile client values unchanged.
+  - T3 never reached the AI (the recipe ran). The two remaining test failures are T5 (trailing slash) and T6 (Ehcache), classified as decisions with no AI edits. The trailing-slash 404s were put down to Spring 6, not held against the security port.
+  - Cheapest run so far: 108k input and 11k output tokens over 3 calls (R24: 170k).
+  - Noise to fix:
+    - the ports table lists every production obligation that couldn't be checked (18 for security), when one line would do;
+    - the contract table shows the trailing-slash 404s as plain `Changed` though a signature explains them;
+    - the HttpClient "Removed code" flag is now a false alarm: the contract proved the removed calls' behaviour was kept;
+    - the summary's column is still headed "Remediation".
 
 Demo talking point: *Maven decided the build is green; review found two behaviour changes the tests do not cover. That is why the output is a draft PR with a reviewer summary, not a merge.*
 
