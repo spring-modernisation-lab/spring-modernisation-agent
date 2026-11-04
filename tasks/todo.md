@@ -273,8 +273,18 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
   - `rewrite-spring` 6.37.1 ships a YAML file that strict parsers reject (quoted strings wrapped into column 0). It's repaired on read, otherwise 1 file of property-rename recipes would be lost.
   - An independent line-by-line walk found 592 recipes in the tree, all of them in the index. The index's 43 extra are real children (for example of `UpgradeSpringBoot_2_0`) that the simple walk missed.
   - 9 unit tests: CSV quoting, options, preconditions, cross-module trees, the column-0 repair, a bad document, the sources file, and SHA-1 refusal. 583 tests pass.
-- [ ] **Deterministic match.** Extract types, members and packages from compile errors and failing tests, then look them up.
-  - Verify on R24's recorded diagnostics (the 12 compile errors): every candidate is real; report what is found for T1, T2 and T4.
+- [x] **Deterministic match** (`RecipeMatcher`).
+  - **Problems:** each compile error (or failing test) with its `symbol:` and `location:` lines.
+  - **Terms:** the missing symbol, joined with its package into a full type name; the location type; and fully qualified types in the message. The repository's own code and the JDK are left out, and a bare package is never a search term.
+  - **Scores:** 3 for the exact type, 2 for a simple name or member, 1 for a specific package.
+  - **Never candidates:** search recipes, version upgrades (`…_7_0`, `MigrateTo…61`), and version families beyond what the route reaches (`boot4` when the route reaches `boot3`). Choosing a version is the route's decision, not a fix.
+  - Each candidate is labelled `NotRun` (a suggestion) or `AlreadyRun` (reported, never suggested).
+  - It reads `ValidationDiagnosticsExtractor.ExtractUnbounded`: the same lines without the AI prompt's length and count limits, which had cut the `MoneyUserType` error before its `UserType`.
+- Verified on probe #5's real post-OpenRewrite build (the 12 compile errors), against the real index, with no AI:
+  - **the only suggestion is `org.openrewrite.hibernate.MigrateUserType`, matched on `org.hibernate.usertype.UserType` in `CustomerOrder.java` and `MoneyUserType.java` (T1);**
+  - already run: `UpgradeApacheHttpClient_5_DeprecatedMethods` and `_ClassMapping` (T2), and `WebSecurityConfigurerAdapter` (T4).
+  - The first version suggested Boot 4, Spring 7 and search recipes from package-only matches; the rules above removed them.
+  - 5 unit tests (terms, ranking and labels, exclusions, score order, unbounded lines). 588 tests pass.
 - [ ] **AI ranking.**
   - One structured call per repository, given the errors and the index shortlist.
   - Names not in the index are dropped.

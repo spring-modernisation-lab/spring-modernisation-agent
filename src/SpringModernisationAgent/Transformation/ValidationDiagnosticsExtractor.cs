@@ -50,6 +50,38 @@ public static partial class ValidationDiagnosticsExtractor
         return Extract(standardOutput, standardError, []);
     }
 
+    /// <summary>
+    /// The same lines without the length and count limits, for deterministic
+    /// matching (recipe discovery). The limits exist for the AI's prompt; a
+    /// cut line can lose the very type a matcher needs.
+    /// </summary>
+    public static IReadOnlyList<string> ExtractUnbounded(
+        TransformationValidationCheckResult check)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+
+        return ExtractUnbounded(check.StandardOutput, check.StandardError, check.FailingTests);
+    }
+
+    public static IReadOnlyList<string> ExtractUnbounded(
+        string? standardOutput,
+        string? standardError,
+        IReadOnlyList<FailingTest>? failingTests = null)
+    {
+        var lines = (failingTests ?? [])
+            .SelectMany(DescribeFailingTest)
+            .ToList();
+
+        lines.AddRange(ExtractMavenErrors(standardOutput));
+
+        lines.AddRange(
+            SplitLines(standardError)
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .Select(line => line.Trim()));
+
+        return lines.Select(RemoveWorkspacePaths).ToList();
+    }
+
     private static IReadOnlyList<string> Extract(
         string? standardOutput,
         string? standardError,
