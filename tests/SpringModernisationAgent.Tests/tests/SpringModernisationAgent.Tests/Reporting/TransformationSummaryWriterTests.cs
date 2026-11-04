@@ -45,27 +45,45 @@ public class TransformationSummaryWriterTests
 
         var attempts = new[]
         {
-            Attempt(1, "compile", applied: true, rejection: null, edits, passed: false, inputTokens: 16230, outputTokens: 3679),
+            Attempt(1, "compile", applied: true, rejection: null, edits, passed: false, inputTokens: 16230, outputTokens: 3679)
+                with { Task = "M-HTTPCLIENT-5-POOL", NotKept = "the task still fails in InventoryClientConfiguration.java" },
             Attempt(2, "compile", applied: false, rejection: "edit 1 ('x'): the search | text was not found", [], passed: null, inputTokens: 900, outputTokens: 80)
+                with { Task = "M-HTTPCLIENT-5-POOL" }
+        };
+
+        var task = new PortTaskRecord(
+            "M-HTTPCLIENT-5-POOL",
+            "Apache HttpClient 5: pool and connection settings",
+            ["src/main/java/a/InventoryClientConfiguration.java"],
+            ["P3"],
+            PortTaskStatus.Reverted,
+            "the guardrails rejected it",
+            [1, 2])
+        {
+            ObligationsKept = ["B-BEAN-default-HttpClient.maxTotal"],
+            ObligationsUnchecked = ["B-BEAN-production-HttpClient.maxTotal"]
         };
 
         var result = Result("orders-service", passed: false, changedFiles: 7) with
         {
-            Remediation = new RemediationReport(RemediationOutcome.AttemptsExhausted, attempts)
+            Remediation = new RemediationReport(RemediationOutcome.NeedsHumanDecision, attempts) { Tasks = [task] }
         };
 
         var markdown = TransformationSummaryWriter.Render([result]);
 
-        Assert.Contains("| orders-service | 7 files changed | Failed (compile) | AttemptsExhausted (2 attempts) | ❌ Failed |", markdown);
-        Assert.Contains("### orders-service: remediation", markdown);
-        Assert.Contains("| # | Check | Decision | Edits | Guardrails | Validation after | Tool calls | Tokens in/out |", markdown);
+        Assert.Contains("| orders-service | 7 files changed | Failed (compile) | 1 reverted (2 attempts) | ⚠️ Needs decision |", markdown);
+        Assert.Contains("### orders-service: AI ports", markdown);
+        Assert.Contains(
+            "| `M-HTTPCLIENT-5-POOL` Apache HttpClient 5: pool and connection settings | InventoryClientConfiguration.java | 1, 2 | ↩️ Reverted: the guardrails rejected it | 1 unchanged. not checked: B-BEAN-production-HttpClient.maxTotal |",
+            markdown);
+        Assert.Contains("| # | Port | Check | Decision | Edits | Validation after | Kept | Tool calls | Tokens in/out |", markdown);
 
         Assert.Contains(
-            "| 1 | compile | Fix | InventoryClientConfiguration.java (whole file, 5 lines); MoneyUserType.java (search/replace, 6 lines) | accepted | Failed (compile) | 3 (1 previews) | 16,230 / 3,679 |",
+            "| 1 | M-HTTPCLIENT-5-POOL | compile | Fix | InventoryClientConfiguration.java (whole file, 5 lines); MoneyUserType.java (search/replace, 6 lines) | Failed (compile) | reverted: the task still fails in InventoryClientConfiguration.java | 3 (1 previews) | 16,230 / 3,679 |",
             markdown);
 
         // Pipes in free text must not break the table.
-        Assert.Contains("rejected: edit 1 ('x'): the search \\| text was not found", markdown);
+        Assert.Contains("rejected by the guardrails: edit 1 ('x'): the search \\| text was not found", markdown);
     }
 
     private static TransformationExecutionResult Result(

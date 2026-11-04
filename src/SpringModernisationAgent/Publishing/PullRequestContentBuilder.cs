@@ -111,15 +111,23 @@ public static class PullRequestContentBuilder
         TransformationExecutionResult result,
         UnsupportedLibraryCatalog libraries)
     {
-        var agentAsked = result.Remediation?.Outcome == RemediationOutcome.NeedsHumanDecision;
-        var proposal = agentAsked ? result.Remediation!.Attempts.LastOrDefault()?.Proposal : null;
+        var forAPerson = result.Remediation is null ? [] : PortText.ForAPerson(result.Remediation);
+        var agentAsked = forAPerson.Count > 0;
 
         body.AppendLine("## Decision needed");
         body.AppendLine();
 
         if (agentAsked)
         {
-            body.AppendLine("The Remediation Agent stopped because the remaining fix needs a person to choose.");
+            body.AppendLine(
+                "The AI ported each known API move as a scoped task. These were not kept, or were never the AI's " +
+                "to do, and need a person:");
+            body.AppendLine();
+
+            foreach (var item in forAPerson)
+            {
+                body.AppendLine($"- {item}");
+            }
         }
 
         var known = result.UnsupportedLibraries
@@ -162,15 +170,15 @@ public static class PullRequestContentBuilder
                       " Fix each difference or accept it with a decision.");
         }
 
-        if (proposal is not null)
+        foreach (var (mapping, diagnosis, options) in result.Remediation is null ? [] : PortText.CannotFixOptions(result.Remediation))
         {
             body.AppendLine();
-            body.AppendLine($"**Why (AI-generated):** {proposal.Diagnosis}");
+            body.AppendLine($"**Why `{mapping}` could not be ported (AI-generated):** {diagnosis}");
             body.AppendLine();
             body.AppendLine("**Options (AI-generated):**");
             body.AppendLine();
 
-            foreach (var option in proposal.Options)
+            foreach (var option in options)
             {
                 body.AppendLine($"- {option}");
             }
@@ -248,10 +256,7 @@ public static class PullRequestContentBuilder
 
         if (result.Remediation is { } remediation)
         {
-            var attempts = remediation.Attempts.Count;
-
-            body.AppendLine(
-                $"- Remediation: **{remediation.Outcome}** after {attempts} attempt{(attempts == 1 ? "" : "s")}");
+            body.AppendLine($"- AI ports: **{PortText.Counts(remediation)}**");
         }
 
         body.AppendLine();
@@ -407,10 +412,18 @@ public static class PullRequestContentBuilder
             return;
         }
 
-        body.AppendLine("**Remediation Agent attempts:**");
+        if (result.Remediation!.Tasks.Count > 0)
+        {
+            body.AppendLine("**Scoped AI ports** (each kept only if its errors are gone, nothing new fails and its behaviour is unchanged):");
+            body.AppendLine();
+            body.Append(PortText.Tasks(result.Remediation));
+            body.AppendLine();
+        }
+
+        body.AppendLine("**AI attempts** (a reverted attempt is recorded, but it is not in this pull request):");
         body.AppendLine();
-        body.AppendLine("| # | Check | Edits | Validation after |");
-        body.AppendLine("|---|---|---|---|");
+        body.AppendLine("| # | Port | Check | Edits | Validation after | Kept |");
+        body.AppendLine("|---|---|---|---|---|---|");
 
         foreach (var attempt in attempts)
         {
@@ -419,11 +432,10 @@ public static class PullRequestContentBuilder
                 : string.Join("; ", attempt.AppliedEdits.Select(edit =>
                     $"{Path.GetFileName(edit.Path)} ({Kind(edit.Kind)}, {edit.ChangedLines} lines)"));
 
-            var after = attempt.Validation is null
-                ? attempt.RejectionReason is null ? "-" : "rejected by guardrails"
-                : attempt.Validation.Status.ToString();
+            var after = attempt.Validation?.Status.ToString() ?? "-";
 
-            body.AppendLine($"| {attempt.Number} | {attempt.FailedCheck} | {Cell(edits)} | {after} |");
+            body.AppendLine(
+                $"| {attempt.Number} | {attempt.Task ?? "-"} | {attempt.FailedCheck} | {Cell(edits)} | {after} | {Cell(PortText.Kept(attempt))} |");
         }
 
         body.AppendLine();

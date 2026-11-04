@@ -538,7 +538,19 @@ public sealed class TransformCommand
         RemediationReport remediation)
     {
         Console.WriteLine(
-            $"  Remediation: {remediation.Outcome}");
+            $"  AI ports: {PortText.Counts(remediation)}");
+
+        foreach (var task in remediation.Tasks)
+        {
+            Console.WriteLine(
+                $"    {task.Mapping}: {PortText.Outcome(task)}; behaviour: {PortText.Behaviour(task)}");
+        }
+
+        foreach (var left in remediation.LeftForAPerson)
+        {
+            Console.WriteLine(
+                $"    For a person: {left}");
+        }
 
         foreach (var attempt in remediation.Attempts)
         {
@@ -553,7 +565,7 @@ public sealed class TransformCommand
                 : "applied; validation still fails";
 
             Console.WriteLine(
-                $"    Attempt {attempt.Number} ({attempt.FailedCheck}): {status}");
+                $"    Attempt {attempt.Number} ({attempt.Task ?? attempt.FailedCheck}): {status}; {PortText.Kept(attempt)}");
 
             if (proposal is not null)
             {

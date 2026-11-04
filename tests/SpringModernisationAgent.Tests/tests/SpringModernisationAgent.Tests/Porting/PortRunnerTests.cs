@@ -167,6 +167,13 @@ public class PortRunnerTests : IDisposable
         Assert.EndsWith("-port-m-httpclient-5-pool-reverted", result.AttemptPatches[^1].Stage);
         Assert.Equal(2, behaviour.Calls);
         Assert.Null(result.Behaviour); // the files changed after the last comparison
+
+        // Review flags look only at AI code that is in the pull request.
+        var stages = result.Report.Attempts.Select(attempt => attempt.Patch!.Stage).ToList();
+        Assert.True(result.Report.IsKeptAiPatch(stages[0]));
+        Assert.False(result.Report.IsKeptAiPatch(stages[1]));
+        Assert.False(result.Report.IsKeptAiPatch(stages[2]));
+        Assert.False(result.Report.IsKeptAiPatch(result.AttemptPatches[^1].Stage));
         Assert.False(result.FinalValidation.Passed);
     }
 

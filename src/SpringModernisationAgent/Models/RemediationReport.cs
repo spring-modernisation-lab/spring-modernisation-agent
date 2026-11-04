@@ -42,6 +42,19 @@ public sealed record RemediationReport(
 
     /// <summary>Problems no task worked, with why: they go to a person.</summary>
     public IReadOnlyList<string> LeftForAPerson { get; init; } = [];
+
+    /// <summary>
+    /// Whether a patch stage is AI-written code that is in the final tree: an
+    /// applied attempt that was kept, of a task that ended accepted. Reverted
+    /// attempts are recorded for audit, but they are not in the pull request.
+    /// </summary>
+    public bool IsKeptAiPatch(
+        string stage) =>
+        Attempts.Any(attempt =>
+            attempt.Patch?.Stage == stage
+            && attempt.Applied
+            && attempt.NotKept is null
+            && (attempt.Task is null || Tasks.Any(task => task.Mapping == attempt.Task && task.Status == PortTaskStatus.Accepted)));
 }
 
 /// <summary>How a scoped port ended.</summary>

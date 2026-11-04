@@ -4,7 +4,7 @@ AI-assisted migration of a Spring estate from Spring Boot 2.7 / Java 11 to Sprin
 
 > **Deterministic tools make the changes they reliably can; a bounded AI ports what is left, one problem at a time, against a behaviour contract recorded on the baseline; facts decide what needs a person; and Maven plus that contract decide what works.**
 
-**Status:** the pipeline below is built and proven in CI (runs 11–24). Its remediation step is being redesigned (Phase 8): the open "make Maven green" loop kept finding new workarounds. It is being replaced by a recorded behaviour contract, problems classified by kind, scoped AI ports and durable fixes. See [`docs/system-design.md`](docs/system-design.md) §2–§5.
+**Status:** the pipeline below is built and proven in CI (runs 11–26). The open "make Maven green" loop kept finding new workarounds, so it has been replaced (Phase 8) by a behaviour contract recorded on the baseline (proven in run 26), problems classified by kind, and scoped AI ports that are kept only if they keep their behaviour. Durable fixes are next. See [`docs/system-design.md`](docs/system-design.md) §2–§5.
 
 ## Where to start
 
@@ -36,14 +36,28 @@ flowchart TD
         T4{"Maven validates<br/>compile and tests"}
         T5["Classify what is left, from facts<br/>mechanical · API move · platform dropped ·<br/>contract · knock-on"]
         T6["Recipe discovery<br/>matches indexed recipes, measures them<br/>on a throwaway copy: suggestions only"]
-        T7["🤖 AI Remediation Agent<br/>read-only tools, previews its edits,<br/>proposes edits or asks for a decision"]
-        T8{"Guardrails<br/>no new types, no test edits,<br/>no dropped annotations or settings,<br/>no unsupported libraries"}
+        P1["One task per known API move<br/>its files, its errors, checked notes,<br/>the behaviour it must keep"]
+        T7["🤖 AI ports one task<br/>reads, previews its edits,<br/>proposes changes to the task's files only"]
+        T8{"Guardrails<br/>only the task's files, no new types,<br/>no test edits, no dropped annotations<br/>or settings, no unsupported libraries"}
+        K{"Kept?<br/>the task's errors are gone<br/>and nothing new fails"}
+        R["Revert the task's files<br/>one repair with the exact failure,<br/>then it goes to a person"]
+        G{"Contract gate<br/>each kept port's behaviour<br/>unchanged on Boot 3.5?"}
+        D["For a person<br/>platform dropped · contract changes ·<br/>ports not kept"]
         T9["Compare behaviour<br/>on Boot 3.5 / Java 21"]
         T1 --> T2 --> T3 --> T4
-        T4 -- "fails" --> T5 --> T6 --> T7 --> T8
-        T8 -- "rejected" --> T7
-        T8 -- "applied" --> T4
-        T4 -- "passes, or attempts used up" --> T9
+        T4 -- "fails" --> T5 --> T6 --> P1
+        T5 -- "not an API move" --> D
+        P1 -- "next task" --> T7 --> T8
+        T8 -- "applied" --> K
+        T8 -- "rejected" --> R
+        K -- "yes" --> P1
+        K -- "no" --> R
+        R -. "repair" .-> T7
+        R -- "still not kept" --> D
+        P1 -- "no tasks left" --> G
+        G -- "changed: repair, then revert" --> R
+        G -- "unchanged" --> T9
+        T4 -- "passes" --> T9
     end
 
     subgraph VERDICT["3 · Verdict, from facts only"]
@@ -65,6 +79,7 @@ flowchart TD
 
     A4 --> T1
     T9 --> V
+    D --> V
     V1 --> H1
     V2 --> H1
     V3 --> H1
@@ -80,7 +95,7 @@ flowchart TD
 |---|---|---|
 | **Assess** (`assess`) | Scans the estate, works out dependencies and waves, and checks the baseline builds. The AI writes the strategy document. | Deterministic rules; the AI only explains |
 | **Transform** (`transform`) | Clones each repository in the next wave at its assessed commit, runs the OpenRewrite recipes for its route, and validates with Maven. Every stage is recorded as a patch. | OpenRewrite, then Maven |
-| **Remediate** (part of `transform`, opt-in) | When validation fails, the Remediation Agent reads the evidence through read-only tools and proposes edits, or a decision. Guardrails decide what may be applied; Maven re-validates. | The proposal comes from the AI; policy and Maven decide |
+| **Port** (part of `transform`, opt-in) | What the recipes left is classified from facts. Each known API move becomes one scoped task: the AI proposes changes to that task's files only. A port is kept only if its errors are gone, nothing new fails and the behaviour it must keep is unchanged; otherwise it is reverted after one repair. Everything else goes to a person. | The proposal comes from the AI; facts, guardrails, Maven and the behaviour contract decide |
 | **Report** (`report`) | Writes the migration results document. | Deterministic, plus labelled AI analysis |
 | **Hand over** (`publish`, opt-in) | Writes a reviewer summary and opens or updates a **draft** pull request on `migration/spring-boot-3.5-java-21`. It never pushes to the default branch and never merges. | A person |
 
@@ -120,8 +135,9 @@ A green build also hid real losses: in run 14, a `POST` to `/api/orders/` (trail
 
 ## What the AI may and may not do
 
-- **May:** read the workspace, OpenRewrite's patch, diagnostics and real library signatures; preview its edits against the same guardrails that apply them; propose edits to `src/main/**` (`.java`, `.kt`, `.properties`, `.yml`, `.yaml`); ask for a decision.
-- **May not:** edit tests, `pom.xml`, CI or build files; add new types (named or anonymous) or new supertypes; write code against unsupported libraries; remove behaviour annotations such as `@Cacheable` or `@Transactional`; change existing settings' values; refer to test files from production code; decide that anything succeeded.
+- **May:** read the workspace, OpenRewrite's patch, its task's diagnostics and real library signatures; preview its edits against the same guardrails that apply them; propose changes to **its task's files only**; say it cannot port a task, with options for a person.
+- **May not:** edit any file outside its task, or tests, `pom.xml`, CI or build files; add new types (named or anonymous) or new supertypes; write code against unsupported libraries; remove behaviour annotations such as `@Cacheable` or `@Transactional`; change existing settings' values; refer to test files from production code; decide what is a decision (classification does that); decide that anything succeeded.
+- **Bounded:** one attempt and one repair per task. A port that is not kept is reverted, and the attempt is shown in the pull request.
 
 ## Running it
 

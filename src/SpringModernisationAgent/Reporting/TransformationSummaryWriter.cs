@@ -30,7 +30,9 @@ public static class TransformationSummaryWriter
                 ? "not enabled"
                 : result.Remediation.Attempts.Count == 0
                     ? result.Remediation.Outcome.ToString()
-                    : $"{result.Remediation.Outcome} ({Plural(result.Remediation.Attempts.Count, "attempt")})";
+                    : result.Remediation.Tasks.Count > 0
+                        ? PortText.Counts(result.Remediation)
+                        : $"{result.Remediation.Outcome} ({Plural(result.Remediation.Attempts.Count, "attempt")})";
 
             markdown.AppendLine(Row(
                 result.Transformation.RepositoryName,
@@ -47,19 +49,20 @@ public static class TransformationSummaryWriter
         foreach (var result in results.Where(result => result.Remediation?.Attempts.Count > 0))
         {
             markdown.AppendLine();
-            markdown.AppendLine($"### {result.Transformation.RepositoryName}: remediation");
+            markdown.AppendLine($"### {result.Transformation.RepositoryName}: AI ports");
             markdown.AppendLine();
-            markdown.AppendLine("| # | Check | Decision | Edits | Guardrails | Validation after | Tool calls | Tokens in/out |");
-            markdown.AppendLine("|---|---|---|---|---|---|---|---|");
+
+            if (result.Remediation!.Tasks.Count > 0)
+            {
+                markdown.Append(PortText.Tasks(result.Remediation));
+                markdown.AppendLine();
+            }
+
+            markdown.AppendLine("| # | Port | Check | Decision | Edits | Validation after | Kept | Tool calls | Tokens in/out |");
+            markdown.AppendLine("|---|---|---|---|---|---|---|---|---|");
 
             foreach (var attempt in result.Remediation!.Attempts)
             {
-                var guardrails =
-                    attempt.Error is not null ? $"error: {attempt.Error}"
-                    : attempt.RejectionReason is not null ? $"rejected: {attempt.RejectionReason}"
-                    : attempt.Applied ? "accepted"
-                    : "-";
-
                 var edits = attempt.AppliedEdits.Count == 0
                     ? "-"
                     : string.Join("; ", attempt.AppliedEdits.Select(edit =>
@@ -69,11 +72,12 @@ public static class TransformationSummaryWriter
 
                 markdown.AppendLine(Row(
                     attempt.Number.ToString(CultureInfo.InvariantCulture),
+                    attempt.Task ?? "-",
                     attempt.FailedCheck,
                     attempt.Proposal?.Decision.ToString() ?? "-",
                     edits,
-                    guardrails,
                     attempt.Validation is null ? "-" : DescribeValidation(attempt.Validation),
+                    PortText.Kept(attempt),
                     $"{attempt.ToolCalls.Count} ({previews} previews)",
                     $"{Tokens(attempt.InputTokens)} / {Tokens(attempt.OutputTokens)}"));
             }

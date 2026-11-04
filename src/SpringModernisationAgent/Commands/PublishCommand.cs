@@ -164,7 +164,7 @@ public sealed class PublishCommand
             {
                 patches.Add(new ReviewPatch(
                     patch.Stage,
-                    AiWritten: patch.Stage.Contains("remediation", StringComparison.Ordinal),
+                    AiWritten: result.Remediation?.IsKeptAiPatch(patch.Stage) == true,
                     await File.ReadAllTextAsync(path, cancellationToken)));
             }
         }

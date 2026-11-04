@@ -23,10 +23,11 @@ public class PullRequestContentBuilderTests
         Assert.False(content.NeedsDecision);
 
         Assert.Contains("Maven validation: **Passed**", content.Body);
-        Assert.Contains("Remediation: **Fixed** after 1 attempt", content.Body);
+        Assert.Contains("AI ports: **1 accepted (1 attempt)**", content.Body);
         Assert.Contains("## Review flags (1)", content.Body);
         Assert.Contains("**Request mapping** `src/main/java/a/OrderController.java` (05-remediation-attempt-4)", content.Body);
-        Assert.Contains("| 1 | compile | OrderController.java (search/replace, 3 lines) | Passed |", content.Body);
+        Assert.Contains("| 1 | M-SECURITY-6-FILTERCHAIN | compile | OrderController.java (search/replace, 3 lines) | Passed | kept |", content.Body);
+        Assert.Contains("| `M-SECURITY-6-FILTERCHAIN` Spring Security 6: WebSecurityConfigurerAdapter removed | OrderController.java | 1 | ✅ Accepted | - |", content.Body);
         Assert.Contains("## AI explanation (AI-generated, not authoritative)", content.Body);
         Assert.Contains("Compilation now succeeds.", content.Body);
         Assert.Contains($"Source commit: `{Sha}`", content.Body);
@@ -51,6 +52,8 @@ public class PullRequestContentBuilderTests
         var outcome = content.Body.IndexOf("## Outcome", StringComparison.Ordinal);
 
         Assert.True(decision >= 0 && decision < outcome);
+        Assert.Contains("- `M-SECURITY-6-FILTERCHAIN` (OrderController.java): ✋ Cannot fix: the AI could not port it", content.Body);
+        Assert.Contains("**Why `M-SECURITY-6-FILTERCHAIN` could not be ported (AI-generated):**", content.Body);
         Assert.Contains("- Use Caffeine with an explicit time-to-live.", content.Body);
         Assert.Contains("Maven validation: **Failed** (unit-tests)", content.Body);
         Assert.DoesNotContain("## AI explanation", content.Body);
@@ -179,8 +182,9 @@ public class PullRequestContentBuilderTests
                 new TransformationValidationCheckResult("unit-tests", passed, null, null)
             ]);
 
+        // A scoped port: accepted, or one the AI said it cannot do.
         var decision = outcome == RemediationOutcome.NeedsHumanDecision
-            ? RemediationDecision.NeedsHumanDecision
+            ? RemediationDecision.CannotFix
             : RemediationDecision.Fix;
 
         var attempt = new RemediationAttemptRecord(
@@ -191,7 +195,7 @@ public class PullRequestContentBuilderTests
                 "Spring Boot 3 removed Ehcache 2 support.",
                 "Ehcache 2 integration was removed.",
                 [],
-                decision == RemediationDecision.NeedsHumanDecision
+                decision == RemediationDecision.CannotFix
                     ? ["Use Caffeine with an explicit time-to-live.", "Use Ehcache 3 through JCache."]
                     : []),
             Applied: decision == RemediationDecision.Fix,
@@ -205,8 +209,18 @@ public class PullRequestContentBuilderTests
         {
             AppliedEdits = decision == RemediationDecision.Fix
                 ? [new AppliedEdit("src/main/java/a/OrderController.java", RemediationEditKind.SearchReplace, 3)]
-                : []
+                : [],
+            Task = "M-SECURITY-6-FILTERCHAIN"
         };
+
+        var task = new PortTaskRecord(
+            "M-SECURITY-6-FILTERCHAIN",
+            "Spring Security 6: WebSecurityConfigurerAdapter removed",
+            ["src/main/java/a/OrderController.java"],
+            ["P1"],
+            decision == RemediationDecision.Fix ? PortTaskStatus.Accepted : PortTaskStatus.CannotFix,
+            decision == RemediationDecision.Fix ? null : "the AI could not port it: Spring Boot 3 removed Ehcache 2 support.",
+            [1]);
 
         return new TransformationExecutionResult(
             new TransformationResult(
@@ -224,7 +238,7 @@ public class PullRequestContentBuilderTests
                 new PatchArtifact("01-openrewrite", "patches/orders-service/01-openrewrite.patch", "beef", ["pom.xml"]),
                 new PatchArtifact("cumulative", "patches/orders-service/cumulative.patch", "cafe", ["pom.xml"])
             ],
-            Remediation = new RemediationReport(outcome, [attempt])
+            Remediation = new RemediationReport(outcome, [attempt]) { Tasks = [task] }
         };
     }
 
