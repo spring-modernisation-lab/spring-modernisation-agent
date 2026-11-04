@@ -76,6 +76,16 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
 - **Response:**
   - The pattern now matches only characters that can appear in type arguments. Replay: run 23 attempt 3 is rejected (`adds anonymous classes (Cache, CacheManager)`), and every earlier replay is unchanged.
   - New deterministic rule: a repository that still uses an unsupported library never "succeeds", even if Maven passes. The AI cannot edit `pom.xml`, so a green build means the library was worked around. The outcome is **Needs decision**, the PR is `[Needs decision]` with a pipeline-written explanation ("Maven passed anyway ..."), and it does not count as succeeded for wave progression.
+- **Run 24** (`e1850c2`, the last run of the old design): **orders-service `Needs decision` after 2 attempts (as in R22), with the right PR.** It's `[Needs decision]`, with the pipeline-written explanation and the Ehcache 2 manual steps. platform-parent is `Succeeded`. 170k input tokens, the cheapest run so far.
+  - Attempt 1 fixed T1, T2 and T4 at compile. The security rewrite kept both users and their roles.
+  - Attempt 2 chose NeedsHumanDecision and carried a T3 fix, but **the fix was wrong**: it replaced the class names with bare names and tried `jakarta.servlet.` + name, but `HttpServletRequest` lives in `jakarta.servlet.http`. The same six tests still failed, and the run kept the change. R14, R20, R21 and R23 had all made the correct rename.
+  - Attempt 1 also dropped the connection TTL again (`setConnectionTimeToLive(30s)` became `setValidateAfterInactivity(30s)`), as in R14. The pool sizes were carried over under their HttpClient 5 names. The "Removed code" flag caught it.
+- **Response: a step back, not another rule.** The open "make Maven green" loop had produced a new workaround or behaviour loss in almost every run since R14. `docs/system-design.md` §2–§5 replaces it with:
+  - a behaviour contract recorded on the baseline (which would have caught the TTL, the POST loophole and the unbounded cache);
+  - problems classified and routed by kind: T3 by recipe; T1, T2 and T4 as scoped ports; T5 and T6 as decisions, with no AI edits;
+  - AI fixes made durable as recipes and mappings.
+
+  Plan: `tasks/todo.md` Phase 8.
 
 Demo talking point: *Maven decided the build is green; review found two behaviour changes the tests do not cover. That is why the output is a draft PR with a reviewer summary, not a merge.*
 

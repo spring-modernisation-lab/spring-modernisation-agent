@@ -2,7 +2,9 @@
 
 AI-assisted migration of a Spring estate from Spring Boot 2.7 / Java 11 to Spring Boot 3.5 / Java 21.
 
-> **Deterministic tools make most of the changes, a bounded AI proposes the rest, policy decides what may be applied, Maven decides what works, and a person decides what matters.**
+> **Deterministic tools make the changes they reliably can; a bounded AI ports what is left, one problem at a time, against a behaviour contract recorded on the baseline; facts decide what needs a person; and Maven plus that contract decide what works.**
+
+**Status:** the pipeline below is built and proven in CI (runs 11–24). Its remediation step is being redesigned (Phase 8): the open "make Maven green" loop kept finding new workarounds. It is being replaced by a recorded behaviour contract, problems classified by kind, scoped AI ports and durable fixes. See [`docs/system-design.md`](docs/system-design.md) §2–§5.
 
 ## Where to start
 
@@ -47,7 +49,7 @@ Artifacts per run:
 
 Locally: `dotnet test`, then `dotnet run --project src/SpringModernisationAgent -- <assess|transform|report|publish>`. The commands read and write `Artifacts/` in the working directory.
 
-The planned control-plane commands (`run start`, `run status`, `run fetch`, `digest`, `explain`, `replay`, `ledger`) are described in `docs/system-design.md` §7 and tracked as Phase 8 in `tasks/todo.md`.
+The planned control-plane commands (`run start`, `run status`, `run fetch`, `digest`, `explain`, `replay`, `ledger`) are described in `docs/system-design.md` §10 and tracked as Phase 8 in `tasks/todo.md`.
 
 ## Configuration
 

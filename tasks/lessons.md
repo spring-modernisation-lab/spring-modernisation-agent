@@ -2,6 +2,10 @@
 
 Rules learned while building and driving this pipeline. Each lesson names the run that taught it. Read this before changing policy, the agent's instructions, or the publishing path.
 
+## Above all
+
+**When every fix creates the next problem, stop fixing and redesign.** From R16 to R24 each run produced a new workaround and each response was one more rule. The cause was the design: an optimiser aimed at "Maven green", which didn't mean "behaviour kept", with every kind of problem in one loop. The answer was to change the target (a behaviour contract), the routing (problem kinds) and the learning (durable fixes); see `docs/system-design.md` §2.
+
 ## Policy and guardrails
 
 1. **After a guardrail is bypassed twice, look for an invariant instead of another shape rule.** In R16–R23 the agent re-implemented Ehcache 2 five ways; each shape rule held for one run. What ended it was a fact the AI cannot change: the POM still declares the library, so a green build cannot mean it was migrated (`I-UNSUPPORTED-NEVER-SUCCEEDS`).
@@ -12,7 +16,7 @@ Rules learned while building and driving this pipeline. Each lesson names the ru
 ## The Remediation Agent
 
 5. **Give it real facts instead of letting it guess.** `describe_class` ended three runs of guessed HttpClient 5 signatures (R13). Telling it up front which libraries are unsupported cut R22 to two attempts.
-6. **Let a decision carry the independent fixes.** In R22 the agent knew the `javax.servlet` fix but could not send it with its decision, so the PR lacked it.
+6. **Don't let a decision hold back, or smuggle in, other fixes: work problems one at a time.** In R22 the agent knew the `javax.servlet` fix but could not send it with its decision. In R24 it sent one, the fix was wrong, and the run kept it anyway. The redesign classifies each problem and accepts a fix only if its own evidence disappears (design §4.1).
 7. **Its options are not policy.** R22 suggested a hand-written in-memory cache "for tests". The PR shows fixed, pipeline-written manual steps first, and the AI's options are labelled.
 
 ## Running and publishing

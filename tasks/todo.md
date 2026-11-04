@@ -1,6 +1,6 @@
 # Plan: AI-assisted upgrade demo
 
-Status (4 November 2026): Phases 0–5 built and proven in CI (runs 11–23). **Phase 8 (agent control plane, policy as data, accretion) is the next piece of work**; Phases 6–7 (document polish, rehearsal) follow it. The system model behind Phase 8 is [`docs/system-design.md`](../docs/system-design.md).
+Status (4 November 2026): Phases 0–5 built and proven in CI (runs 11–24). After R24 we stepped back: the open "make it green" remediation loop kept producing new workarounds. **Phase 8 is the redesign that replaces it**: a behaviour contract recorded on the baseline, problems classified and routed by kind, scoped AI ports, and durable fixes. Phases 6–7 (document polish, rehearsal) follow it. Design: [`docs/system-design.md`](../docs/system-design.md).
 
 ## Goal
 
@@ -19,7 +19,8 @@ Closing message: *automation did what it reliably could; AI handled the long tai
 - [x] The Remediation Agent fixes it, and Maven validation passes afterwards (run 14: `orders-service` Fixed in 4 attempts, traps T1–T5).
 - [x] At least one seeded case the AI **can't** or **shouldn't** fix is reported clearly and not "fixed" (run 22: T6 Ehcache 2 → `NeedsHumanDecision`, `[Needs decision]` draft PR). Since `e1850c2` this is also enforced by an invariant, not just the agent's judgement.
 - [x] The artifacts include: the OpenRewrite patch, the AI patch, the validation evidence for each attempt, and the reviewer summary (runs 20 onwards, plus draft PRs).
-- [ ] The same outcome on repeated runs (run 24 onwards; see Phase 7 repeatability).
+- [x] The same outcome on repeated runs for the decision case: R22 and R24 both ended `NeedsDecision` in 2 attempts (R23's false "Fixed" is now impossible).
+- [ ] A `Succeeded` repository also matches its baseline behaviour contract (Phase 8.2), so green means the behaviour was kept, not just that the tests passed.
 
 ### Out of scope for the demo (kept in the backlog)
 
@@ -212,77 +213,107 @@ Today the Remediation Agent may not edit test sources at all; a test that needs 
 - [ ] Flag every accepted test edit in the reviewer summary.
 - [ ] Tests for each case (import-only accepted; assertion change rejected; mixed edit rejected).
 
-## Phase 8: Agent control plane, policy as data, accretion
+## Phase 8: Redesign: behaviour contract, problem kinds, durable fixes
 
-Design: [`docs/system-design.md`](../docs/system-design.md). The aim is that an agent driving the system can understand any run from one small artifact, verify any policy change against all past runs in seconds, and leave every run's lesson behind as data. Each step lists how it is verified.
+Design: [`docs/system-design.md`](../docs/system-design.md). §2 explains why the open "make it green" loop went in circles from R13 to R24. §3–§5 describe the replacement.
 
-### 8.1 Stable identifiers (design §3)
+**Order: first stop the circle, then strengthen the target, then narrow the AI's job, then make fixes durable.** Each step lists how it is verified. Steps marked *(no CI)* are verified locally against the recorded runs.
 
-- [ ] Rule IDs as constants (`G-PATH-SCOPE`, `G-EXT`, `G-LIMITS`, `G-MATCH-ONCE`, `G-WHOLE-FILE-SIZE`, `G-DESIGN-TYPES`, `G-DESIGN-ANON`, `G-DESIGN-SUPERTYPE`, `G-LIB-UNSUPPORTED`, `G-TEST-REFERENCE`, `G-BEHAVIOUR-ANNOTATION`, `G-CFG-VALUE`, `G-CFG-REMOVED`, `G-CFG-YAML`). Every rejection reason starts with its ID.
-- [ ] Invariant IDs (`I-UNSUPPORTED-NEVER-SUCCEEDS`, `I-AGENT-DECISION`, `I-MAVEN-AUTHORITATIVE`), fact kinds (`F-…`) and flag IDs (`FLAG-SECURITY`, `FLAG-MAPPING`, `FLAG-CALL-REMOVED`, `FLAG-CI`, `FLAG-LARGE-ADDITION`).
-- [ ] Traps renamed to `T1`–`T6` in `tasks/demo-traps.md`; runs cited as `R<n>`.
-- [ ] Each instruction rule in `RemediationAgent.Instructions` names the rule ID that enforces it. An instruction with no enforcing rule is marked as guidance.
-- Verify: a test asserts every rejection path produces a reason starting with a registered ID; `grep G-DESIGN-ANON` finds the rule, its test, its fixture and the docs.
+**Superseded by this plan:**
+- R24's "keep a decision's fixes only if they made progress" proposal; 8.4's acceptance rule covers it;
+- adding further shape guardrails;
+- the old order in which the control plane came first.
 
-### 8.2 One verdict function (design §5)
+### 8.0 Stop the circle (now)
 
-- [ ] `Verdict { State, Reasons[] }` computed in one place from the result. `Succeeded`, `NeedsDecision`, PR eligibility, wave gating and every summary icon read it; nothing re-derives it.
-- [ ] Facts are computed once per repository and passed down: today the coordinator and the Remediation Loop each run `UnsupportedLibraries.FindIn` on the same source.
-- [ ] Reasons are rendered in the job summary, the PR ("Needs decision: `I-UNSUPPORTED-NEVER-SUCCEEDS` (Ehcache 2)") and the results document.
-- Verify: table-driven tests over every state × reason; R22 and R23 results produce `NeedsDecision` with the expected reasons.
+- [ ] Freeze shape guardrails: no new `G-DESIGN-*` style rules. New workarounds are answered by a contract item, a problem kind or an invariant (design §9.1).
+- [ ] No more CI runs of the open loop to probe agent behaviour. The next CI run tests 8.1–8.5 together.
+- [x] R24 recorded in `tasks/demo-traps.md` as the last run of the old design.
 
-### 8.3 Run digest (design §7.2)
+### 8.1 First durable fix: T3 as a recipe (design §5) *(no CI for the recipe; CI to confirm)*
 
-- [ ] `digest` command and `run-digest.json` (`schema: digest/1`, about 2 KB): request, verdict and reasons per repository, facts, per-attempt decision/policy/after/flags/tokens, trap IDs fixed, PR, total cost (tokens, minutes, currency at the deployment's rate).
-- [ ] The workflow writes the digest's Markdown form as the job summary and uploads the JSON; the existing `transformation-summary.md` becomes a view of it.
-- [ ] `explain <run-dir> <repo> [--attempt n]` for the detail behind one line of the digest.
-- Verify: golden-file tests for R14, R22 and R23 digests; the digest of R23 alone is enough to state what happened and why it stopped.
+- [ ] A declarative recipe in the route that rewrites `javax.servlet` string literals to `jakarta.servlet`, keeping each sub-package (`.http.HttpServletRequest` must stay `.http`). Check the exact OpenRewrite building block in the pinned `rewrite` versions before choosing it; write a small custom recipe if none fits.
+- [ ] Added to `spring-boot-application-2.7-to-3` in `spring.yaml`, after the Boot and Java recipes.
+- Verify: applied to R24's post-OpenRewrite tree, it reproduces R14 attempt 3's change exactly. In CI, trap T3 no longer reaches the AI.
 
-### 8.4 Replay as a product command (design §7.3)
+### 8.2 Behaviour contract v1 (design §3)
 
-- [ ] `replay <run-dir>`: rebuilds each attempt's base tree from the recorded patches and re-runs current policy on the recorded proposal; prints the verdict diff against what was recorded.
-- [ ] `corpus/`: the proposals of R14, R16, R20, R21, R22 and R23, each with its expected verdict (accept, or the rule ID that must reject it).
-- [ ] A test runs the whole corpus, so a policy change that alters any verdict fails until the fixture's expectation is updated in the same commit.
-- Verify: today's results reproduced (R14 all accepted; R16 a2, R20 a2–a3, R21 a3–a5 and R23 a3 rejected by the named rules).
+- [ ] Probe: a pipeline-owned JUnit 5 test plus its dependencies. It is added to the workspace's test classpath only during validation and excluded from every patch (like `target/`). It must compile against both Boot 2.7 and Boot 3.5.
+- [ ] Item kinds for v1, chosen because they are what the runs actually lost:
+  - `B-SEC-*`: access, endpoint × user → status, from the routes and users the app declares;
+  - `B-CFG-*`: resolved settings per profile;
+  - `B-BEAN-*`: key bean properties (HTTP client pool: max total, per route, connection TTL, eviction);
+  - `B-CACHE-*`: cache names, expiry and size;
+  - `B-CTX-*`: context starts, per profile.
+- [ ] `Config/knowledge/behaviour-probes.yaml`, selected per route; validated on load.
+- [ ] The baseline record is made with the baseline build, stored as `Artifacts/behaviour/<repo>.json`, and kept with the assessment. After migration the probe runs again and `contract diff` compares the two: `same`, `changed`, `unavailable` or `allowed`.
+- [ ] `I-CONTRACT-MATCHES` in the verdict: `changed` or `unavailable` blocks success. A decision record can mark a difference `allowed`.
+- Verify:
+  - the baseline record for `orders-service` shows the known values (pool 50/20, TTL 30s, cache 30s/1000, viewer and operator access);
+  - applying R14's cumulative patch shows `B-SEC-POST-/api/orders/-viewer` and the TTL as `changed`;
+  - R24's patch shows the TTL as `changed`;
+  - R23's shows the cache as `changed`.
 
-### 8.5 Knowledge as data (design §6.2)
+  Needs a JDK, so it runs in a probe workflow, not locally.
 
-- [x] Unsupported libraries moved to `Config/knowledge/unsupported-libraries.yaml` (`UnsupportedLibraryCatalog`). It is validated on load: unknown fields, missing required fields, an invalid package and duplicates stop the run, naming the file and the entry. The loaded list is byte-identical to the old hard-coded one; corpus replay is unchanged. A test proves a library added only in YAML is detected, enforced by the guardrail and given manual steps in the PR.
-- [ ] Move the behaviour annotations and settings rules the same way.
-- [ ] `api-notes.yaml`: short, checked notes on moved APIs (HttpClient 4 → 5 pool and TTL methods, Hibernate 6 `UserType`, Security 6 adapter removal), offered to the Remediation Agent by a `get_api_notes(topic)` tool.
-- [ ] Adding an entry needs no code change; a test proves an entry added only in YAML is detected, enforced and rendered in the PR.
-- Verify: corpus replay unchanged after the move; the PR manual steps are byte-identical.
+### 8.3 Problem kinds and knowledge (design §4, §9.2) *(no CI)*
 
-### 8.5b Unsupported libraries derived from data (design §6.3)
+- [ ] `diagnostic-signatures.yaml`: pattern → `K-*`, plus a recipe or mapping. `api-mappings.yaml`: `M-HIBERNATE-6-USERTYPE`, `M-HTTPCLIENT-5-POOL`, `M-SECURITY-6-FILTERCHAIN`, each with checked notes and the contract items a port must keep. For example, `M-HTTPCLIENT-5-POOL` keeps the TTL through `ConnectionConfig`, which answers R14 and R24.
+- [ ] The classifier assigns exactly one kind to every failing test and diagnostic group. `K-PLATFORM-DROPPED` comes from the catalogue, now (and from the BOM comparison, 8.9).
+- [ ] Move the behaviour-annotation and settings rules into `Config/knowledge/` (the catalogue is already there).
+- Verify: on the recorded diagnostics of R13–R24, every problem is classified; T3 → `K-MECHANICAL`, T1/T2/T4 → `K-API-MOVE`, T5 → `K-CONTRACT`, T6 → `K-PLATFORM-DROPPED`; nothing is `K-UNKNOWN`.
 
-The catalogue says what to *do* about a library. Which libraries Boot dropped can be computed rather than remembered.
+### 8.4 Scoped ports replace the open loop (design §4.1)
 
-- [ ] During assessment, compare the managed dependencies in `spring-boot-dependencies` for the source and target Boot versions (2.7.x and 3.5.x), and cache the result per version pair. Libraries Boot stopped managing, such as `net.sf.ehcache`, are **dropped by the platform**.
-- [ ] Flag a repository that depends on a dropped library and does not pin its own version as `F-UNSUPPORTED-LIBRARY`, with source `bom-diff`. Curated catalogue entries keep source `catalogue`.
-- [ ] A dropped library with no catalogue entry still blocks success (`I-UNSUPPORTED-NEVER-SUCCEEDS`). The PR gets generic steps ("choose a supported replacement; Spring Boot 3.5 no longer manages this dependency") and lists it as a **catalogue candidate**. A person then writes the entry once (design §9.4).
-- [ ] The guardrail uses package prefixes for curated entries only: a BOM entry gives Maven coordinates, not Java packages, so derived entries are enforced through the invariant and the PR, not by code scanning.
-- [ ] Limitation, stated in the PR and the docs: the diff only finds libraries Boot *used to* manage. Libraries Boot never managed (Springfox, the Keycloak adapter) still need curated entries.
-- Verify: the 2.7.18 → 3.5.x diff includes `net.sf.ehcache:ehcache`; `orders-service` is flagged from both sources; a test repository depending on another dropped artifact with no catalogue entry is `NeedsDecision` with generic steps.
+- [ ] `PortTask`: problem, mapping, the files in scope (from the diagnostics), evidence for this problem only, and obligations (contract items). The agent's tools and instructions are scoped to the task; edits outside its files are rejected.
+- [ ] Acceptance:
+  1. the task's evidence is gone;
+  2. nothing new fails;
+  3. its obligations are `same`.
 
-### 8.6 Control commands (design §7.1)
+  Otherwise the workspace is restored to the task's base tree (a "restore tree" step in the patch recorder), and the problem goes to a person with the attempt attached. One attempt plus one repair.
+- [ ] Problems are worked in order (mechanical, API moves, then decisions); a problem whose evidence has disappeared is closed.
+- [ ] `K-PLATFORM-DROPPED` and `K-CONTRACT` never create a task. The AI's NeedsHumanDecision choice is replaced by classification; it may only propose a kind for `K-UNKNOWN`.
+- [ ] Remove the repository-wide attempt loop and the `remediation-max-attempts` input (replaced by per-task bounds).
+- Verify:
+  - unit tests for acceptance, revert, ordering and closing;
+  - replaying R24 attempt 2 as a task is rejected (`HttpServletRequest` still missing) and reverted;
+  - a local port trial of `M-HTTPCLIENT-5-POOL` keeps the TTL obligation.
 
-- [ ] `run start --request run-request.yaml`: dispatch through the GitHub API with explicit inputs, plus an optional `hypothesis:` the digest checks. The request is uploaded with the results.
-- [ ] `run status <id>` and `run fetch <id>` (artifacts into `runs/R<id>/` with hash verification and a manifest).
-- [ ] Read-only versus side-effecting is stated in `--help`; side-effecting commands are idempotent.
-- Verify: start, status and fetch against a real run; a fetched run directory is self-describing (request, digest, manifest, results, patches, summaries).
+### 8.5 One verdict, with reasons (design §8.2) *(no CI)*
 
-### 8.7 Ledger and generated history (design §9.5)
+- [ ] `Verdict { State, Reasons[] }` from one function, using the Maven result, contract differences, remaining problem kinds and invariants. Wave gating, the PR, the summary and the results document read only it.
+- [ ] Facts (unsupported libraries, contract, kinds) are computed once per repository and passed down. Today the coordinator and the loop each call `UnsupportedLibraries.FindIn`.
+- Verify: table-driven tests over state × reason; R22, R23 and R24 produce `NeedsDecision` with the expected reasons.
 
-- [ ] `ledger add <run-dir>` appends the digest to `runs/ledger.jsonl`; `ledger show` prints per-trap outcomes and cost across runs, with variance.
-- [ ] The run tables in `tasks/demo-traps.md` are generated from the ledger; the narrative and talking points stay hand-written.
-- Verify: R13–R24 back-filled; the generated table matches today's hand-written facts.
+### 8.6 Stable identifiers throughout (design §7) *(no CI)*
 
-### 8.8 Accretion loops (design §9)
+- [ ] New parts (kinds, contract items, mappings, tasks) start with IDs. Retrofit rule IDs into guardrail messages, flag IDs and `T1`–`T6`.
+- Verify: a test asserts every rejection, task result and contract difference starts with a registered ID.
 
-- [ ] Recipe candidates: the ledger counts recurring AI fixes by trap and file, and lists any fix seen in three runs as an OpenRewrite recipe candidate (T3 `javax.servlet` strings is the first).
-- [ ] Decision records: `decisions/<repo>.yaml` (`D-<repo>-<n>`: the chosen replacement and who chose it). The next run reads it, applies the chosen route as a deterministic Change (`actor: Recipe` or `Person`), and the invariant is satisfied by that fact.
-- [ ] Every run that reveals a new workaround ends with a corpus fixture and, where possible, an invariant rather than a new shape rule (design §5: after two bypasses, look for the invariant).
-- Verify: a decision record for `orders-service` (Ehcache 3 via JCache) moves T6 from `NeedsDecision` to a deterministic change in a CI run.
+### 8.7 Digest, explain, replay and contract diff as commands (design §10) *(no CI)*
+
+- [ ] `digest` (`digest/1`, about 2 KB, the job summary's source), `explain`, `replay` (proposals and recipes, with a corpus of R14–R24 and expected verdicts), and `contract diff`.
+- Verify: golden digests for R14, R22, R23 and R24; corpus replay reproduces today's verdicts; the T3 recipe replays to R14's fix.
+
+### 8.8 Durable-fix loop and decision records (design §5, §12)
+
+- [ ] When a person accepts a port in a PR, the AI drafts a recipe, mapping or signature from it; replay proves it; a person approves it in a commit with a fixture.
+- [ ] `decisions/<repo>.yaml` (`D-…`): the chosen replacement, the contract differences it allows, and who decided. The next run applies it as a deterministic change.
+- Verify: `D-orders-service-1` (Ehcache 3 via JCache) moves T6 from `NeedsDecision` to a deterministic change, with contract items `same` (cache 30s/1000).
+
+### 8.9 Derived knowledge: the BOM comparison (design §9.3)
+
+- [ ] During assessment, compare the managed dependencies of `spring-boot-dependencies` for 2.7.x and 3.5.x, cached per version pair. Libraries Boot stopped managing (such as `net.sf.ehcache`) become `K-PLATFORM-DROPPED` (source `bom-diff`). Curated entries keep source `catalogue`.
+- [ ] A dropped library with no catalogue entry still blocks success. The PR gets generic steps and lists it as a catalogue candidate.
+- [ ] The guardrail uses curated package prefixes only (a BOM entry gives Maven coordinates, not Java packages). Limitation stated: the comparison only finds libraries Boot *used to* manage; Springfox and the Keycloak adapter still need curated entries.
+- Verify: the 2.7.18 → 3.5.x comparison includes `net.sf.ehcache:ehcache`; `orders-service` is flagged from both sources.
+
+### 8.10 Control commands and the ledger (design §10.1, §10.4)
+
+- [ ] `run start --request` (with `hypothesis:`), `run status`, `run fetch` (manifest and hashes); `ledger add` / `ledger show`.
+- [ ] The ledger reports outcome variance, cost, and **the AI's share of the work per kind**, the measure of progress. The run tables in `tasks/demo-traps.md` are generated from it.
+- Verify: R13–R24 back-filled; the generated tables match the hand-written facts.
 
 ## Phase 6: Document polish (small)
 
@@ -304,7 +335,9 @@ The catalogue says what to *do* about a library. Which libraries Boot dropped ca
 
 Done: Phase 3 → 4.1–4.6 → CI runs → Phase 5.
 
-Next: **8.1 → 8.2 → 8.3 → 8.4** (identifiers, verdict, digest, replay) → **8.5 → 8.6** (knowledge as data, control commands) → 8.7–8.8 (accretion loops) → 6 → 7. Each step is test-first and committed separately. Steps 8.1–8.4 need no CI run: they are verified against the recorded runs.
+Next: **8.0 → 8.1 → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, then 6 → 7. Each step is test-first and committed separately.
+
+8.3 comes before 8.2 because classification needs no JDK and can be verified on recorded runs straight away. The contract needs a probe workflow.
 
 ## Open decisions
 
@@ -313,7 +346,9 @@ Next: **8.1 → 8.2 → 8.3 → 8.4** (identifiers, verdict, digest, replay) →
 3. ~~Draft PR~~: in scope, on `migration/spring-boot-3.5-java-21`, never merged.
 4. **Test files and `pom.xml` read-only for the AI** (4.4): recommended. It makes the boundary obvious, and the demo traps don't need either to be edited. The cost is that a genuine fix needing a dependency change becomes `NeedsHumanDecision`.
 5. ~~Draft PR when the outcome is `NeedsHumanDecision`~~: decided and built. A `[Needs decision]` draft PR puts the decision and options at the top. A `Failed` or `CannotFix` repository gets no PR.
-6. **Policy changes need a replay diff** (Phase 8): a guardrail or knowledge change is finished only when a replay over the recorded proposals shows exactly the intended verdict changes.
+6. **Policy changes need a replay diff** (Phase 8): a guardrail, recipe, mapping or knowledge change is finished only when a replay over the recorded runs shows exactly the intended differences.
+7. **How the behaviour probe gets onto the test classpath** (8.2). Recommended: the pipeline writes the probe into a dedicated folder for the duration of validation and adds it as an extra test source, never under the repository's own `src/test`. It is excluded from patches, so the AI-cannot-edit-tests rule and the PR are unaffected. The alternative, a separate probe artifact on Maven's test classpath, needs a published artifact.
+8. **Where AI edits stop** (8.4). Recommended: a port may change only the files its task names. That is a positive scope; the existing guardrails stay as the backstop.
 
 ## Review
 

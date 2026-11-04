@@ -1,286 +1,364 @@
 # System design: the Spring modernisation pipeline as an agent-legible system
 
-Status: design, 4 November 2026. Written after CI runs 11–23. Every principle here answers something that actually happened in those runs (see §12). Plans that implement it are in `tasks/todo.md` (Phase 8).
+Status: design, revised 4 November 2026 after CI runs 11–24. Every principle here answers something that actually happened in those runs (see §15).
+
+§2 explains why the first design kept going in circles; §3–§5 are the redesign; §6 onwards are the supporting parts. Plans that implement it are in `tasks/todo.md` (Phase 8).
 
 **Reading order for an agent:**
 1. This page, §1–§5.
 2. `README.md` for the commands.
-3. `tasks/todo.md` for what is built.
+3. `tasks/todo.md` for what is built and next.
 4. `tasks/demo-traps.md` for what the runs showed.
 
-Read code only after you know which layer (§2) and which identifier (§3) you are after.
+Read code only after you know which layer (§6) and which identifier (§7) you are after.
 
 ---
 
 ## 1. The system in one sentence
 
-> **Deterministic tools make most of the changes, a bounded AI proposes the rest, policy decides what may be applied, Maven decides what works, and a person decides what matters.**
+> **Deterministic tools make the changes they reliably can; a bounded AI ports what is left, one problem at a time, against a behaviour contract recorded on the baseline; facts decide what needs a person; and Maven plus that contract decide what works.**
 
-Each clause is one layer, and each layer has a single owner:
-- **Deterministic tools:** OpenRewrite.
-- **A bounded AI:** the Remediation Agent.
-- **Policy:** the rule registry and its knowledge base.
-- **Maven:** the validation checks.
+Each clause has a single owner:
+- **Deterministic tools:** OpenRewrite and our own recipes.
+- **A bounded AI:** the Remediation Agent, given one scoped port at a time.
+- **The behaviour contract:** recorded by the pipeline on the Boot 2.7 baseline, never written by the AI.
+- **Facts:** the catalogue, the BOM comparison and the contract differences.
 - **A person:** decisions, made in the draft PR.
 
-No layer may do another layer's job. The AI never decides success. Maven never decides what is allowed. Policy never writes code. A person is never asked to make a decision that a fact already settles.
+No part may do another part's job:
+- The AI never decides success, never picks a problem's kind, and is never asked to make a decision problem green.
+- Maven never decides what is allowed.
+- A person is never asked to decide something a fact already settles.
 
-## 2. The tower of abstractions
+## 2. Why the first design went in circles
 
-Each layer consumes only the layer below it and produces one kind of artifact. An agent working at layer *n* should never need to read code from layer *n−2*.
+From R13 to R24 the pipeline ran **one open loop**: "here is a failing repository; make Maven green within these rules". Every run, the AI found a new way to get to green, and we added a rule against that particular way. There were four causes, and none of them was a missing rule:
+
+1. **An optimiser pointed at a weak target.** "Make it green" is exactly what the AI did each time:
+   - a hand-written cache (R16, R23);
+   - an anonymous `Cache` (R20);
+   - inline Ehcache code, and `spring.cache.type: none` (R21);
+   - a fallback `ConcurrentMapCacheManager` (R23);
+   - a servlet check rewritten so it still fails (R24).
+
+   Banning shapes after the fact can't keep up with something that is optimising.
+2. **Green didn't mean the behaviour was kept.** No test covered:
+   - the POST privilege loophole (R14);
+   - the dropped connection TTL (R14 and R24);
+   - the unbounded fallback cache (R23).
+
+   Review flags caught some of this, after the fact.
+3. **One treatment for every kind of problem.** A string rename (T3), API ports (T1, T2, T4), a contract question (T5) and a library the platform dropped (T6) all went into the same loop.
+4. **Nothing was learned for good.** The AI re-derived the `javax.servlet` → `jakarta.servlet` fix in every run: correctly in R14, R20, R21 and R23, and wrongly in R24. The knowledge lived in the model's variance, not in the system.
+
+The redesign attacks each cause directly:
+- the **behaviour contract** (§3) strengthens the target;
+- **problem kinds** (§4) give each problem its own path;
+- **durable fixes** (§5) make the system learn for good.
+
+The guardrails stay, but as a backstop rather than the main defence.
+
+## 3. The behaviour contract
+
+Before migrating, the pipeline records what the application **does** on the Boot 2.7 baseline. After migration it records the same things again and compares the two. "Done" means Maven passes **and** the contract matches. A workaround that changes behaviour then fails because of what it does, whatever its code looks like.
+
+### 3.1 What is recorded
+
+The contract is a set of items, each with a stable ID (`B-…`) and a value:
+
+| Item kind | ID example | Value | Would have caught |
+|---|---|---|---|
+| **Access** (endpoint × user → status) | `B-SEC-POST-/api/orders/-viewer` | `403` | R14: the POST trailing-slash loophole |
+| **Resolved setting** | `B-CFG-spring.cache.type@production` | `ehcache` | R21: caching switched off |
+| **Key bean property** | `B-BEAN-HttpClient.connectionTimeToLive` | `30s` | R14 and R24: the TTL dropped |
+| **Cache behaviour** (name, expiry, size) | `B-CACHE-inventoryAvailability` | `ttl 30s, max 1000` | R23: unbounded fallback cache |
+| **Context starts** (per profile) | `B-CTX-production` | `starts` | Trap 3's failure, stated as behaviour |
+
+Which items to record is set per route in configuration: `Config/knowledge/behaviour-probes.yaml`, selected by the route in `spring.yaml`. It is never chosen by the AI.
+
+### 3.2 How it is recorded
+
+- A **pipeline-owned probe**: a small JUnit 5 test with its own dependencies. It is added to the workspace's test classpath only while validation runs, and it is excluded from every patch, in the same way as `target/`.
+- The probe drives MockMvc requests for access items, reads the `Environment` for settings, and reads bean properties through Spring's own introspection. Each probe compiles against both Boot 2.7 and Boot 3.5. A probe that can't be read on one side reports `unavailable`, never a default value.
+- The baseline contract is recorded once per assessed commit, with the baseline build. It is stored as `Artifacts/behaviour/<repo>.json` and kept with the assessment.
+
+### 3.3 How it is compared
+
+| Result | Meaning | Effect |
+|---|---|---|
+| `same` | The value matches | Nothing |
+| `changed` | The value differs | **Blocks success.** Becomes a contract problem (§4) unless a decision record allows it |
+| `unavailable` | The probe couldn't read the item after migration (for example, the bean was removed) | **Blocks success**, as `changed` does: unknown is not "same" |
+| `allowed` | It differs, and a decision record says so (`D-…`) | Nothing; shown in the PR |
+
+The contract is evidence about behaviour, not a proof: it covers only what is recorded. Its value is that it turns the losses the runs actually found into something Maven-level and deterministic, and makes every new probe add to the coverage of every later run.
+
+## 4. Problem kinds and routes
+
+Each failure is **classified from facts first**, then sent down the path for its kind. Classification is deterministic: a lookup in the knowledge base (§9.2), not an AI judgement.
+
+| Kind | ID | Recognised by | Route | Trap |
+|---|---|---|---|---|
+| **Mechanical** | `K-MECHANICAL` | A known diagnostic signature with a recipe | A deterministic recipe, run with OpenRewrite. No AI | T3 (`javax.servlet` strings) |
+| **Known API move** | `K-API-MOVE` | A diagnostic signature mapped to an API mapping (`M-…`) | A **scoped AI port** (§4.1) | T1 `UserType`, T2 HttpClient 5, T4 Security |
+| **Dropped by the platform** | `K-PLATFORM-DROPPED` | The catalogue or the BOM comparison (§9.3) | Straight to a decision, with the catalogue's manual steps. **No AI edit** | T6 Ehcache 2 |
+| **Contract question** | `K-CONTRACT` | A contract item `changed`, or a failing test that asserts an HTTP status or URL | A decision, shown next to the baseline's recorded behaviour | T5 trailing slash |
+| **Unknown** | `K-UNKNOWN` | Nothing matched | AI **diagnosis only**: it proposes a kind and a mapping; a person confirms; no edits | — |
+
+Every failing test and diagnostic group is assigned exactly one kind. Problems are worked in a fixed order: mechanical, then API moves, then decisions. A problem whose evidence disappears after an earlier fix is closed, not worked.
+
+### 4.1 The scoped AI port
+
+This replaces the open loop. The AI gets one **task**, not a repository:
+
+```
+PortTask {
+  problem: K-API-MOVE, mapping: M-HTTPCLIENT-5-POOL
+  files:   [ src/main/java/…/InventoryClientConfiguration.java ]   # from the diagnostics
+  evidence: the diagnostics and failing tests for this problem only
+  obligations: [ B-BEAN-HttpClient.maxTotal = 50, B-BEAN-HttpClient.connectionTimeToLive = 30s, … ]
+  notes:   the mapping's checked API notes; describe_class for real signatures
+}
+```
+
+The task is accepted only if all three conditions hold:
+1. **The targeted evidence is gone:** this problem's diagnostics and failing tests no longer appear.
+2. **Nothing new fails:** no new diagnostic or failing test anywhere.
+3. **The obligations still match:** every contract item the task named is `same`.
+
+Otherwise the change is **reverted to the task's base tree**, and the problem goes to a person with the attempt attached. There is one attempt, plus one repair using the specific failure as feedback. Then the task stops.
+
+Consequences:
+- **Scope is stated positively.** The task names the only files the AI may change. Guardrails remain as a backstop for anything else.
+- **The AI is never asked to make a dropped library green.** Run 23's parser-based cache could not have been written, because the Ehcache problem never reached the AI.
+- **"Better or reverted" falls out of the acceptance rule.** R24's broken servlet fix fails rule 1: `HttpServletRequest` still isn't found. And as a `K-MECHANICAL` problem, T3 would never reach the AI at all.
+- **Cost is bounded per problem,** not per repository.
+
+## 5. Durable fixes: the AI writes the recipe, not the patch
+
+When a person accepts a scoped port in a draft PR, the work isn't finished until it's **durable**:
+
+1. The AI drafts the generalisation from the accepted change, as one of:
+   - an OpenRewrite recipe, when the change is mechanical across code bases;
+   - an API mapping entry (`M-…`) with checked notes, when it still needs judgement but the target API is known;
+   - a diagnostic signature, so the next occurrence is classified straight away.
+2. **Replay proves it.** The recipe, run on the recorded base trees of past runs, must reproduce the accepted fix and leave the contract `same`.
+3. **A person approves it once**, in a commit, with its fixture.
+
+From then on, the problem's kind moves down the table: `K-UNKNOWN` → `K-API-MOVE` → `K-MECHANICAL`. **The AI's per-run share shrinks over time, and that share is the measure of progress.** The ledger (§10.4) reports it per trap and per kind.
+
+T3 is the first candidate. The AI fixed it correctly in four runs and broke it in the fifth, which is exactly the case for making it deterministic.
+
+## 6. The tower of abstractions
+
+Each layer consumes only the layer below it and produces one kind of artifact.
 
 | Layer | Name | Produces | Owner | Deterministic? | Lives in |
 |---|---|---|---|---|---|
-| L0 | **Evidence** | Git trees, patches, Maven output, Surefire XML, token counts | git, Maven, the model API | Yes (the model's text is recorded, not trusted) | `Artifacts/`, `Workspace/`, `Build/`, `Maven/` |
-| L1 | **Facts** | Diagnostics, failing tests, unsupported libraries, review flags, changed files | Extractors | Yes | `Transformation/*Extractor*`, `SurefireReportReader`, `UnsupportedLibraries`, `ReviewFlagDetector` |
-| L2 | **Policy** | Rule verdicts (accept or reject, with rule ID and reason) and outcome invariants | Rule registry and knowledge base | Yes | `RemediationPatchApplier*`, `Config/` (target: `Config/knowledge/`) |
-| L3 | **Actors** | **Changes**: proposed edits with provenance | OpenRewrite, Remediation Agent, a person (decision records) | OpenRewrite yes; AI no; person no | `Transformation/OpenRewrite*`, `Remediation/` |
+| L0 | **Evidence** | Git trees, patches, Maven output, Surefire XML, probe output, token counts | git, Maven, the probe, the model API | Yes (the model's text is recorded, not trusted) | `Artifacts/`, `Workspace/`, `Build/`, `Maven/` |
+| L1 | **Facts** | Diagnostics, failing tests, unsupported libraries, **contract items and differences**, **problem kinds**, review flags | Extractors, the contract comparison, the classifier | Yes | `Transformation/*Extractor*`, `SurefireReportReader`, `UnsupportedLibraries`, `ReviewFlagDetector` (target: `Behaviour/`, `Triage/`) |
+| L2 | **Policy** | Rule verdicts (accept or reject, with rule ID) and task acceptance | Rule registry, knowledge base, the port acceptance rule | Yes | `RemediationPatchApplier*`, `Config/knowledge/` |
+| L3 | **Actors** | **Changes** with provenance | Recipes (OpenRewrite and ours), the scoped AI port, a person (decision records) | Recipes yes; AI no; person no | `Transformation/OpenRewrite*`, `Remediation/` |
 | L4 | **Verdicts** | One verdict per repository, with reasons | The verdict function | Yes | `Models/TransformationExecutionResult` (target: `Verdict`) |
 | L5 | **Hand-off** | Reviewer summary, draft PR, results document | Publishers and reporters | Yes, except sections labelled AI-generated | `Publishing/`, `Reporting/` |
-| L6 | **Control plane** | Run requests, run digests, the ledger, replays | The driver: a person or an agent like me | Yes | `Commands/` (target: `run`, `digest`, `replay`, `ledger`) |
+| L6 | **Control plane** | Run requests, run digests, the ledger, replays | The driver: a person or an agent | Yes | `Commands/` (target: `run`, `digest`, `replay`, `ledger`) |
 
 Two rules make the tower legible:
 - **Upward data, downward control.** Facts flow up. Only L6 starts things, and only L2 can stop an L3 change.
-- **AI output is evidence, never a fact.** A model's diagnosis is stored in L0 with its tokens and tool calls. It becomes a fact only if a deterministic L1 extractor can confirm it. For example, "Ehcache 2 is the cause" counts as a fact because `UnsupportedLibraries.FindIn` found Ehcache 2 in the POM, not because the model said so.
+- **AI output is evidence, never a fact.** A model's diagnosis or proposed kind is stored in L0. It becomes a fact only when a deterministic extractor, the contract or a person confirms it.
 
-## 3. Concepts and stable identifiers
+## 7. Concepts and stable identifiers
 
 Everything an agent needs to reason about has a **stable, greppable ID**. That ID appears identically in:
 - the code (a constant or enum),
-- every message (rejection reasons, PR flags, the job summary),
+- every message (rejection reasons, task results, PR flags, the job summary),
 - the tests (test names cite it),
 - the fixtures (the replay corpus labels it),
 - the docs.
 
-Grepping an ID should find all of them.
-
 | Concept | ID scheme | Example | Meaning |
 |---|---|---|---|
-| Run | `R<number>` | `R23` | One CI execution of `portfolio-transform.yml` |
+| Run | `R<number>` | `R24` | One CI execution of `portfolio-transform.yml` |
 | Wave | `W<n>` | `W1` | Repositories that can migrate together |
-| Route | route id | `spring-boot-application-2.7-to-3` | Recipes plus validation checks for a repository kind (`Config/spring.yaml`) |
-| Stage | `NN-name` | `03-remediation-attempt-2` | One step in a repository's change chain |
-| Tree | git tree id | `4b2f…` | Content address of the workspace after a stage |
-| Change | `<repo>@<stage>` | `orders-service@03-remediation-attempt-2` | Edits from tree A to tree B, by one actor |
-| Rule | `G-<area>-<name>` | `G-DESIGN-ANON`, `G-LIB-UNSUPPORTED`, `G-CFG-VALUE` | One guardrail (L2) |
-| Invariant | `I-<name>` | `I-UNSUPPORTED-NEVER-SUCCEEDS` | An outcome rule over facts (L4) |
-| Fact kind | `F-<name>` | `F-UNSUPPORTED-LIBRARY`, `F-FAILING-TEST` | A deterministic finding (L1) |
+| Route | route id | `spring-boot-application-2.7-to-3` | Recipes, checks and probes for a repository kind (`Config/spring.yaml`) |
+| Problem kind | `K-<kind>` | `K-API-MOVE` | Which path a failure takes (§4) |
+| Contract item | `B-<kind>-<name>` | `B-BEAN-HttpClient.connectionTimeToLive` | One recorded behaviour (§3) |
+| API mapping | `M-<name>` | `M-HTTPCLIENT-5-POOL` | Checked notes for a known API move |
+| Recipe | recipe id | `lab.jakarta.ServletStringLiterals` | A deterministic fix |
+| Stage | `NN-name` | `03-port-M-HTTPCLIENT-5-POOL` | One step in a repository's change chain |
+| Change | `<repo>@<stage>` | `orders-service@03-port-…` | Edits from tree A to tree B, by one actor |
+| Rule | `G-<area>-<name>` | `G-DESIGN-ANON`, `G-LIB-UNSUPPORTED` | One guardrail (backstop) |
+| Invariant | `I-<name>` | `I-UNSUPPORTED-NEVER-SUCCEEDS`, `I-CONTRACT-MATCHES` | An outcome rule over facts |
+| Fact kind | `F-<name>` | `F-UNSUPPORTED-LIBRARY` | A deterministic finding |
 | Flag | `FLAG-<name>` | `FLAG-LARGE-ADDITION` | A review flag in the PR |
 | Trap | `T<n>` | `T6` (Ehcache 2) | A seeded demo problem (`tasks/demo-traps.md`) |
-| Decision | `D-<repo>-<n>` | `D-orders-service-1` | A person's recorded choice (§9.3) |
+| Decision | `D-<repo>-<n>` | `D-orders-service-1` | A person's recorded choice, which may allow contract differences |
 
-Today most of these exist only as prose: rejection reasons are free text, and traps are table rows. Giving them IDs is Phase 8.1. It's the cheapest change with the biggest payoff, because it turns "read and remember" into "grep".
+## 8. The Change model and verdicts
 
-## 4. The Change model
+### 8.1 Changes
 
-OpenRewrite, the AI and a person all do the same kind of thing: they turn one tree into another. The system should model them uniformly:
+OpenRewrite, our recipes, the AI and a person all turn one tree into another, and are modelled uniformly:
 
 ```
 Change {
-  repository, stage, actor: OpenRewrite | RemediationAgent | Person | Recipe(id)
+  repository, stage, actor: OpenRewrite | Recipe(id) | Port(task) | Person(decision)
   baseTree, resultTree, patch (path, sha256), changedFiles
-  policy: [ { rule, verdict, reason } ]      # L2, empty for deterministic actors
-  validation: { checks[], failingTests[] }   # L0/L1, after the change
-  provenance: { proposalId?, tokens?, toolCalls?, decisionId? }
+  policy: [ { rule, verdict, reason } ]        # empty for deterministic actors
+  validation: { checks[], failingTests[] }
+  contract: { item: same | changed | unavailable | allowed }
+  provenance: { taskId?, proposalId?, tokens?, toolCalls?, decisionId? }
 }
 ```
 
-Patches are already chained by tree id (Phase 3), so a repository's history is a **linear change chain**. The cumulative patch is the chain's endpoint. Three things follow:
-- **Attribution is free.** Every line in the draft PR can be traced to one Change, and therefore to one actor.
-- **Replay is exact.** Any Change can be re-checked against today's policy by rebuilding its `baseTree` from the chain. The replay in §7.3 does exactly this.
-- **Human work fits.** A person's decision (§9.3) becomes another Change with `actor: Person` or `actor: Recipe(id)`. It isn't a side channel.
+Patches are chained by tree id, so a repository's history is a linear change chain, and the cumulative patch is its endpoint. Three things follow:
+- **Attribution is free:** every line can be traced to one actor.
+- **Replay is exact** (§10.3).
+- **Reverting a task is just restoring its base tree.**
 
-## 5. Verdicts: one function, with reasons
-
-Runs 22 and 23 showed what happens when "did it work?" is derived in several places: `RemediationOutcome`, `Succeeded`, PR eligibility and the summary icon could all disagree. The target is **one pure function**:
+### 8.2 One verdict function, with reasons
 
 ```
 verdict(result) -> { state: Succeeded | NeedsDecision | Failed | NotRun,
-                     reasons: [ I-… | F-… ] }
+                     reasons: [ I-… | K-… | B-… | F-… ] }
 ```
 
 | State | When | Wave gate | PR |
 |---|---|---|---|
-| `Succeeded` | OpenRewrite succeeded, Maven passed, and no invariant objects | Opens the next wave | Draft PR |
-| `NeedsDecision` | The agent chose NeedsHumanDecision, **or** an invariant holds, e.g. `I-UNSUPPORTED-NEVER-SUCCEEDS` | Blocks | `[Needs decision]` draft PR |
-| `Failed` | Maven failed and no decision is pending | Blocks | None |
+| `Succeeded` | Maven passed, every contract item is `same` or `allowed`, and no invariant objects | Opens the next wave | Draft PR |
+| `NeedsDecision` | Any `K-PLATFORM-DROPPED`, `K-CONTRACT` or rejected port problem remains, or an invariant holds | Blocks | `[Needs decision]` draft PR |
+| `Failed` | Maven failed and nothing is waiting on a person | Blocks | None |
 | `NotRun` | OpenRewrite failed or the repository was skipped | Blocks | None |
 
-**Invariants (L4) beat guardrails (L2) wherever they can.** A guardrail asks "does this edit look like a workaround?", which means pattern-matching code shapes. An invariant asks "can this outcome be true, given the facts?" Across four runs the agent found five code shapes:
-- named classes (R16);
-- an anonymous class (R20);
-- inline Ehcache code and changed settings (R21);
-- a fallback cache manager and a hand-written XML-parsing cache (R23).
+The reasons are printed everywhere: the job summary, the PR, the results document and the digest.
 
-One invariant ended the series: the AI cannot edit `pom.xml`, and the POM still declares an unsupported library, so a green build **cannot** mean it was migrated.
+**Invariants over shapes.** The earlier lesson still holds: when a guardrail has been bypassed twice, look for the invariant. `I-UNSUPPORTED-NEVER-SUCCEEDS` ended the Ehcache series. The contract generalises that lesson. `I-CONTRACT-MATCHES` is the invariant that covers behaviour in general.
 
-Design rule: **when a guardrail has been bypassed twice, look for the invariant.**
+## 9. Policy and knowledge as data
 
-Every verdict carries its reasons. Every surface prints them: the job summary, the PR, the results document and the digest (§7.2). "Needs decision: `I-UNSUPPORTED-NEVER-SUCCEEDS` (Ehcache 2)" tells an agent exactly where to look, where "❌" tells it nothing.
+### 9.1 Guardrails: the backstop
 
-## 6. Policy as data
+The path, design, library, annotation and settings rules stay. They now guard the edges of a scoped task rather than being the main defence.
+- Each rule has an ID that starts its rejection message, and real historical proposals as fixtures.
+- `preview_edits` and application share one code path.
+- **No new shape rules.** A new workaround is answered by a contract item, a problem kind or an invariant.
 
-### 6.1 Rule registry
-
-Every L2 rule is a registered object, not an `if` statement:
-
-```
-Rule { id: "G-DESIGN-ANON", layer: L2, appliesTo: [".java", ".kt"],
-       check(before, after, facts) -> null | reason,
-       motivatedBy: ["R20", "R23"], fixtures: ["corpus/R20-a2.json", "corpus/R23-a3.json"] }
-```
-
-- **One rule, one ID, one reason template.** Rejection messages start with the ID: `G-CFG-VALUE: changes spring.cache.type from 'ehcache' to 'none'`. The Remediation Agent then sees the same ID in feedback that I see in the digest.
-- **Every rule has fixtures.** These are real historical proposals that it must reject, plus legitimate ones it must accept (§9.1). A rule without a fixture that once failed hasn't been tested.
-- **`preview_edits` runs the registry.** The agent's dry run and the real application share one code path. That's true today, and must stay true.
-
-### 6.2 Knowledge base
-
-The facts the rules depend on are currently hard-coded in C#: the unsupported-library list, the behaviour annotations, the settings rule and the manual steps. They belong in versioned data under `Config/knowledge/`, next to the routes:
+### 9.2 Knowledge base (`Config/knowledge/`)
 
 | File | Holds | Used by |
 |---|---|---|
-| `unsupported-libraries.yaml` | Name, package, POM markers, replacements, recommended route, manual steps, alternatives | L1 detection, `G-LIB-UNSUPPORTED`, `I-UNSUPPORTED-NEVER-SUCCEEDS`, the agent prompt, the PR manual steps |
-| `behaviour-annotations.yaml` | Annotations whose removal deletes behaviour | `G-BEHAVIOUR-ANNOTATION` |
-| `settings.yaml` | Protected settings (any existing value) and known renames (old key → new key) | `G-CFG-VALUE`, `G-CFG-REMOVED` |
-| `api-notes.yaml` | Short, checked notes on moved APIs (HttpClient 4 → 5 pool methods, Hibernate 6 `UserType`) | Retrieved by the agent on demand (§8) |
+| `unsupported-libraries.yaml` | **Built.** Name, package, POM markers, replacements, manual steps, alternatives | `K-PLATFORM-DROPPED`, `G-LIB-UNSUPPORTED`, `I-UNSUPPORTED-NEVER-SUCCEEDS`, the PR |
+| `diagnostic-signatures.yaml` | Pattern over a diagnostic or failing test → kind, and recipe or mapping | The classifier (§4) |
+| `api-mappings.yaml` | `M-…`: old API → new API, checked notes, and the contract items a port must keep | Scoped ports (§4.1) |
+| `behaviour-probes.yaml` | Which contract items to record, per route | The contract (§3) |
+| `behaviour-annotations.yaml`, `settings.yaml` | Annotation and settings rules | Guardrails (§9.1) |
 
-Adding knowledge must never need a code change. It's one YAML entry plus one fixture. That makes the system **accretive**: each run's lesson becomes data that every later run uses.
+Adding knowledge never needs a code change: it's one YAML entry plus one fixture. The catalogue is validated on load; the others will be too.
 
-`unsupported-libraries.yaml` is the first file moved (Phase 8.5). The catalogue is validated on load, and a test proves an entry that exists only in YAML is detected, enforced and rendered in the PR.
+### 9.3 Derived knowledge
 
-### 6.3 Derived knowledge
+Where the platform publishes the facts, compute them. Comparing the `spring-boot-dependencies` BOMs for the source and target versions shows which libraries Boot dropped, Ehcache 2 among them.
+- Libraries Boot never managed (Springfox, the Keycloak adapter) need catalogue entries.
+- A dropped library with no catalogue entry is still `K-PLATFORM-DROPPED`. It gets generic steps and becomes a catalogue candidate.
 
-Where the platform publishes the facts, compute them rather than curate them. Spring Boot's BOM (`spring-boot-dependencies`) lists every dependency it manages. Comparing the source and target BOMs shows which libraries Boot dropped, Ehcache 2 among them.
-- **Detection comes from data:** the BOM comparison, plus the curated catalogue for libraries Boot never managed (Springfox, the Keycloak adapter).
-- **Guidance stays curated:** manual steps need a person to write them once.
-- **A dropped library with no catalogue entry still blocks success.** It gets generic steps and becomes a catalogue candidate. Unknown risk is never treated as no risk.
+## 10. The control plane: the driver's interface
 
-Phase 8.5b in `tasks/todo.md` plans this.
+### 10.1 Commands
 
-## 7. The control plane: the driver's interface
-
-Driving the pipeline means starting runs, knowing what each one showed, and checking a change before spending a CI run on it. Today the inputs of a run are not recorded alongside its results, artifacts must be fetched by hand, and the history lives only as narrative in `tasks/demo-traps.md`. The control plane makes each of these one command, with recorded inputs and a compact, stable output.
-
-### 7.1 Commands
-
-Each command is either **read-only** or **side-effecting**, and labelled as such in `--help`. Side-effecting commands take a request file and are idempotent.
+Each command is labelled **read-only** or **side-effecting** in `--help`. Side-effecting commands take a request file and are idempotent.
 
 | Command | Kind | What it does |
 |---|---|---|
-| `run start --request run-request.yaml` | side-effecting | Dispatches the workflow through the API with the request's inputs, and prints the run id. The request is uploaded with the results, so every run records exactly how it was started. |
-| `run status <id>` | read-only | Shows the state of the run, plus the step currently running and its last progress line |
-| `run fetch <id>` | read-only | Downloads the artifacts into `runs/R<id>/`, verifies the hashes, and writes a manifest |
-| `digest <run-dir>` | read-only | The **run digest** (§7.2), as JSON plus Markdown, about 2 KB |
-| `explain <run-dir> <repo> [--attempt n]` | read-only | One repository's change chain with rule verdicts, failing tests and the decision, without the patch bodies |
-| `replay <run-dir> [--policy HEAD]` | read-only | Re-checks every recorded proposal against current policy and diffs the verdicts against the recorded ones (§7.3) |
-| `ledger add <run-dir>` / `ledger show` | side-effecting / read-only | Appends the digest to `runs/ledger.jsonl` and shows trends |
+| `run start --request run-request.yaml` | side-effecting | Dispatches the workflow with the request's inputs. The request is uploaded with the results |
+| `run status <id>` / `run fetch <id>` | read-only | Run state; artifacts into `runs/R<id>/` with hashes and a manifest |
+| `digest <run-dir>` | read-only | The run digest (§10.2) |
+| `explain <run-dir> <repo> [--problem K-…]` | read-only | One repository's problems, tasks, contract differences and decisions |
+| `replay <run-dir>` | read-only | Re-checks recorded proposals and recipes against current policy (§10.3) |
+| `contract diff <before> <after>` | read-only | Compares two behaviour records |
+| `ledger add` / `ledger show` | side-effecting / read-only | Run history, the AI's share per kind, recurrence counts |
 
-Replay, digest and explain already exist in prototype form, in the trial harness used to verify the guardrail changes in runs 20–23. They should become product commands with tests.
+### 10.2 The run digest
 
-### 7.2 The run digest: read first, read little
+This is the one entry point to a run: about 2 KB, schema-versioned (`digest/1`), with facts, IDs and counts only. Per repository it lists:
+- the verdict and its reasons;
+- the problems with their kinds and outcomes (closed by a recipe, ported, reverted, or decision);
+- the contract differences;
+- the tasks with their tokens;
+- the PR.
 
-The digest is the single entry point to a run. It's designed to answer, in one read, what happened, why it stopped and what it cost. Illustrative example, using R23's real token totals as the digest would report them once the invariant applies:
+It's published as the job summary, as `run-digest.json` and through `digest`, from one source.
 
-```json
-{ "run": "R23", "commit": "99adb50", "request": { "remediation": true, "maxAttempts": 5, "pullRequests": true },
-  "repositories": [
-    { "name": "orders-service", "verdict": "NeedsDecision",
-      "reasons": ["I-UNSUPPORTED-NEVER-SUCCEEDS:Ehcache 2"],
-      "facts": { "unsupportedLibraries": ["Ehcache 2"], "failingTests": [] },
-      "attempts": [
-        { "n": 2, "decision": "Fix", "policy": "accepted", "after": "unit-tests failed",
-          "fixed": ["T3"], "flags": ["FLAG-LARGE-ADDITION"], "tokens": [41578, 3660] } ],
-      "pr": { "number": 1, "title": "[Needs decision] …", "created": false } } ],
-  "cost": { "inputTokens": 372414, "outputTokens": 28275 },
-  "schema": "digest/1" }
-```
+### 10.3 Replay
 
-The digest follows four rules:
-- **Facts, IDs and counts only.** No patch bodies, no stack traces. Those are one `explain` away.
-- **Schema-versioned** (`schema: digest/1`). It never renames a field silently.
-- **Deltas against the previous ledger entry** for the same request: what improved, what regressed, and how cost changed.
-- **Published three ways from one source:** printed to the job summary, uploaded as `run-digest.json`, and returned by `digest`.
+Replay rebuilds a base tree from the change chain and re-runs current policy (or a new recipe) on the recorded input, in seconds and with no tokens. In R20–R24 it was the strongest verification tool: it proved each policy change in both directions and exposed a bug in a guardrail. **A policy, recipe or mapping change is finished only when replay over the corpus shows exactly the intended differences.**
 
-### 7.3 Replay: the cheapest experiment
+### 10.4 The ledger
 
-Replay rebuilds each attempt's base tree from the change chain and re-runs **today's** policy on the recorded proposal. It costs seconds and no tokens. In this session it was the strongest tool I had:
-- it proved that each guardrail change rejected the bad proposal and kept every legitimate one (run 14 stayed fully accepted throughout);
-- in run 23 it showed in one step that the guardrail itself had a bug, not the model.
+`runs/ledger.jsonl` holds one digest per run. It answers three questions over time:
+- How varied are the outcomes?
+- What does a run cost?
+- **How much of the work is still AI work, per kind?**
 
-Replay output is a verdict diff, for example:
+The run tables in `tasks/demo-traps.md` are generated from it.
 
-```
-R23 a3  accepted -> rejected  G-DESIGN-ANON  (Cache, CacheManager)
-R14 a1  accepted -> accepted
-```
+## 11. The inner agent's ergonomics
 
-A policy change is only finished when replay over the whole corpus shows exactly the intended diffs.
+| Principle | How |
+|---|---|
+| **One task, stated positively** | A `PortTask` names the problem, the files, the mapping and the obligations (§4.1) |
+| **Facts up front** | The task's evidence only, the mapping's notes and the obligations, not the whole repository's failures |
+| **Real signatures** | `describe_class` (built) |
+| **Dry run on the real policy** | `preview_edits` (built), extended to report which obligations a preview would break |
+| **Feedback names the rule or obligation** | "`B-BEAN-HttpClient.connectionTimeToLive` changed from 30s to unavailable" |
+| **Never asked to decide** | Kinds come from facts; the AI may propose a kind only for `K-UNKNOWN` |
+| **Bounded** | One attempt plus one repair per task, a tool-call budget, and tokens recorded per task |
 
-## 8. The inner agent's ergonomics
+## 12. Accretion: how the system gets better on its own record
 
-The Remediation Agent is also an agent driving a system. The same principles apply:
+1. **Durable fixes (primary, §5).** Accepted ports become recipes, mappings and signatures.
+2. **Contract coverage.** Every behaviour loss found in review becomes a probe, so every later run checks it.
+3. **Decision records.** `decisions/<repo>.yaml` records a person's choice, for example `D-orders-service-1: Ehcache 2 → Ehcache 3 via JCache`. It also lists the contract differences that choice allows. The next run applies the choice as a deterministic Change.
+4. **Corpus.** Every recorded proposal, recipe run and contract record is kept as a replay fixture.
+5. **Knowledge entries.** A lesson is one YAML entry plus a fixture; code changes only for a new kind of rule.
 
-| Principle | Today | Next |
-|---|---|---|
-| **Facts up front, not discovered** | The failed check, diagnostics, earlier attempts and unsupported libraries | Plus the rule list by ID, and the relevant `api-notes` entries |
-| **Real signatures, never guesses** | `describe_class` (javap); fixed run 13's HttpClient guessing | Keep it. Cache results across attempts |
-| **Dry run on the real policy** | `preview_edits` runs the full applier | Return rule IDs; show "would be rejected by G-…" before the agent answers |
-| **Feedback names the rule** | Rejection reason text | Start it with the rule ID, so the agent can map a rejection to an instruction |
-| **Decisions carry independent fixes** | Since `99adb50` | Keep. Run 22 showed the cost of not allowing it |
-| **Budgets** | 40 tool calls, 5 previews, 1–5 attempts | Record cost per attempt in the digest; stop early on repeated rejection by the same rule |
-| **Narrow, honest options** | Options are AI-written and labelled | The PR leads with the knowledge base's manual steps; AI options are listed after them |
-
-The prompt is part of policy. Every instruction in `RemediationAgent.Instructions` maps to a rule ID. An instruction with no enforcing rule is a hope, not a rule, and the prompt should say which is which.
-
-## 9. Accretion: how the system gets better on its own record
-
-A run should leave the system more capable, not just a set of artifacts. There are five loops, each with an owner and an artifact:
-
-1. **Guardrail corpus (every run).** `ledger add` copies each attempt's proposal, its base-tree reference and the verdict it received into `corpus/`. Any proposal a person later judges wrong gets the expected verdict and becomes a regression fixture. Runs 16, 20, 21 and 23 are the first entries.
-2. **Recipe candidates (recurring AI fixes).** If the AI makes the same kind of fix in several runs, it shouldn't be AI work any more. Examples: `javax.servlet` strings → `jakarta` (T3 in runs 14, 20, 21 and 23), the Hibernate 6 `UserType` port (T1), and the security adapter (T4). The ledger counts recurring fixes by trap and file, and proposes an OpenRewrite recipe once a fix recurs three times. The AI's share should shrink over time, and the ledger shows that trend.
-3. **Decision records (people → system).** A `[Needs decision]` PR ends with the person's choice, recorded as `decisions/<repo>.yaml`, for example `D-orders-service-1: Ehcache 2 → Ehcache 3 via JCache`. The next run reads it. The chosen route becomes a Change by `actor: Recipe(...)` or `Person`, and the invariant that blocked the repository is satisfied by a fact, not by the AI.
-4. **Knowledge entries (lessons → data).** A run that teaches something about a library or API ends with one YAML entry in `Config/knowledge/` and one fixture. Code changes only when a new kind of rule is needed.
-5. **Ledger (history → docs).** `runs/ledger.jsonl` is the record of runs. `tasks/demo-traps.md` keeps the narrative and the demo talking points, but its tables are generated from the ledger, so the docs can't drift from the evidence. In this session `tasks/todo.md` drifted: its status line, the PR input name and a "the AI writes the narrative" claim were all out of date.
-
-## 10. Economy: the cost ladder
-
-Climb a rung only when the rung below can't answer the question:
+## 13. Economy: the cost ladder
 
 | Rung | Costs | Answers |
 |---|---|---|
 | 1. `digest` / `explain` | Nothing | What happened, and why it stopped |
-| 2. `replay` | Seconds, no tokens | Does today's policy treat recorded proposals correctly? |
-| 3. Local trial (agent against a reconstructed workspace, no Maven) | Tokens, about 2 minutes | Does the agent's behaviour change with these instructions or tools? |
-| 4. CI run | About 15 minutes, 0.3–0.8M tokens, a person to fetch artifacts (until `run fetch`) | Does Maven agree? Does the PR look right? |
+| 2. `replay`, `contract diff` | Seconds, no tokens | Does current policy, or a new recipe, treat recorded inputs correctly? |
+| 3. Local port trial (one `PortTask` against a reconstructed tree) | Tokens, about a minute | Does a mapping or instruction change the port? |
+| 4. CI run | About 15 minutes and real tokens | Does Maven agree? Does the contract match? Does the PR look right? |
 
 Guidelines:
-- **One hypothesis per CI run,** written in the run request (`hypothesis:`) and checked by the digest.
-- **Expect variance.** The same code gave Fixed in 4 attempts (R14), AttemptsExhausted (R20, R21) and NeedsHumanDecision in 2 attempts (R22). Judge behaviour over several runs in the ledger, not one.
-- **Stop early by policy, not by budget.** R22's early decision cost 0.3M tokens where R21's five attempts cost 0.7M. An agent that knows the invariants should decide sooner.
+- One hypothesis per CI run.
+- Judge behaviour over several runs.
+- The scoped design should also cost less: R24's two attempts used 170k input tokens for the whole repository, while a port task sees only its own evidence.
 
-## 11. Evidence contract
+## 14. Evidence contract
 
-- Every artifact is content-addressed (`sha256` in the manifest) and comes from one run and one commit.
-- Every JSON file carries `schema: <name>/<version>`, and readers accept older versions (as `Patches` and `UnsupportedLibraries` already do).
-- Each run directory is self-describing: it contains the request, the digest, the manifest, results, patches, summaries and PR records, so an agent can analyse it with no outside context.
-- The model's text is stored verbatim with its tokens and tool calls, and is always labelled as AI-generated wherever a person reads it.
+- Every artifact is content-addressed and comes from one run and one commit.
+- Every JSON file carries `schema: <name>/<version>`, and readers accept older versions.
+- A run directory is self-describing: request, digest, manifest, results, patches, behaviour records, summaries and PR records.
+- The model's text is stored verbatim with its tokens and tool calls, and is always labelled where a person reads it.
 
-## 12. What the runs taught, and where the design answers it
+## 15. What the runs taught, and where the design answers it
 
-| Run | What happened | Design answer |
+| Run | What happened | Answer |
 |---|---|---|
-| R13 | The agent guessed HttpClient 5 signatures three times | §8: real signatures (`describe_class`); `api-notes` |
-| R14 | Fixed, but a review found a privilege-escalation risk and a dropped TTL | §5: green is not enough; review flags; draft PR only |
-| R16 | Hand-written cache that games the test | `G-DESIGN-TYPES`, `G-TEST-REFERENCE`; §5: look for the invariant |
-| R20 | Anonymous class got past the type rule | `G-DESIGN-ANON`; §7.3: replay proved it |
-| R21 | Removed `@Cacheable`; switched production caching off; GitHub 500 on push | `G-BEHAVIOUR-ANNOTATION`, `G-CFG-VALUE`; push retry; publish failures in the summary |
-| R22 | Correct decision, but a known fix was left out | §8: decisions carry independent fixes |
-| R23 | "Fixed" with a parser-based fake cache; guardrail bug in the generics pattern | `I-UNSUPPORTED-NEVER-SUCCEEDS`; §6.1: rules need fixtures; §7.3: replay found the bug |
-| All | Run inputs not recorded with results; artifacts fetched by hand; history kept only as narrative | §7: `run start` / `run fetch` / `digest` / `ledger` |
+| R13 | Guessed HttpClient 5 signatures | `describe_class`; `api-mappings` |
+| R14 | Fixed, but a POST loophole and a dropped TTL | §3 contract: `B-SEC-…`, `B-BEAN-…` |
+| R16 | Hand-written cache that games the test | §4: T6 is `K-PLATFORM-DROPPED` and never reaches the AI |
+| R20 | Anonymous-class cache | Same as R16; `G-DESIGN-ANON` stays as a backstop |
+| R21 | Removed `@Cacheable`; caching switched off in production | §3: `B-CFG-spring.cache.type`, `B-CACHE-…` |
+| R22 | Correct decision; a known fix left out | §4: problems are worked one at a time, so independent fixes don't wait on a decision |
+| R23 | "Fixed" with a parser-based fake cache; a guardrail bug | §4 and `I-UNSUPPORTED-NEVER-SUCCEEDS`; §10.3: replay found the bug |
+| R24 | Decision correct; the carried servlet fix still failed; TTL dropped again | §4.1: rejected for not removing its evidence, then reverted; §5: T3 becomes a recipe; §3: `B-BEAN-…TimeToLive` |
+| All | One open loop chasing green; knowledge re-derived each run | §2–§5 |
 
-## 13. Non-goals
+## 16. Non-goals
 
-- **Autonomy beyond proposals.** The AI never applies, merges, pushes or decides success, and never edits tests, POMs or CI.
-- **Agent-written policy.** An agent (including me) may *propose* a rule or knowledge entry. A rule becomes policy only with a fixture, a replay diff and human review in a commit.
+- **Autonomy beyond proposals.** The AI never applies, merges, pushes or decides success, never picks a problem's kind (outside `K-UNKNOWN` suggestions), and never edits tests, POMs or CI.
+- **Agent-written policy.** An agent may *propose* a recipe, mapping, probe or rule. It becomes policy only with a fixture, a replay diff and human review in a commit.
+- **A complete behaviour proof.** The contract covers what is recorded, and grows as reviews find gaps.
 - **Hiding non-determinism.** Variance between runs is recorded and reported, never averaged away.
