@@ -416,7 +416,7 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
   - `PortPlanner.Plan(problems, knowledge, attempted)` → tasks in order. API moves are grouped by mapping, in order of first appearance. A mapping already attempted is never planned again, and problems of other kinds create no task.
   - A task has its files (from the problem subjects), evidence, the mapping's notes and `mustKeep`, and obligation patterns.
   - Test-failure API moves whose subject isn't a file get their files from `src/main` frames in the evidence. With none, they go to a person.
-- [ ] **3. Acceptance (pure).**
+- [x] **3. Acceptance (pure).** (`PortAcceptance.Judge`, `PortObligations.Check`; 9 tests, including R24 attempt 2 rejected and run 26: TTL broken, trailing slash explained by the platform, production items unchecked.)
   - `PortAcceptance.Judge(task, before, after)`: evidence gone, nothing new fails (the rules above), plus the reason when not.
   - Contract gate: `ObligationCheck(tasks, comparison, behaviourSignatures)` → for each task, the obligation differences that platform signatures don't explain.
 - [ ] **4. Restore.** `IWorkspacePatchRecorder.RestoreAsync(path, treeId, files)`: `git checkout <tree> -- <file>` for files in the tree, and delete files that aren't. A reverted attempt's patch is still recorded and published, labelled reverted. The chain's base stays at the task's base tree.
