@@ -100,6 +100,7 @@ public sealed class RemediationLoop : IRemediationLoop
 
         // Resolved once: the dependencies do not change between attempts.
         var classInspector = await CreateClassInspectorAsync(plan, workspace, cancellationToken);
+        var unsupportedLibraries = UnsupportedLibraries.FindIn(workspace.RepositoryPath);
 
         for (var number = 1; number <= _maxAttempts; number++)
         {
@@ -125,7 +126,10 @@ public sealed class RemediationLoop : IRemediationLoop
                 JavaVersion: plan.Target.JavaVersion,
                 FailedCheck: failedCheck.Check,
                 Diagnostics: diagnostics,
-                PreviousAttempts: run.Feedback.ToList());
+                PreviousAttempts: run.Feedback.ToList())
+            {
+                UnsupportedLibraries = unsupportedLibraries
+            };
 
             var attempt = new RemediationAttemptRecord(
                 Number: number,

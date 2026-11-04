@@ -83,6 +83,12 @@ public sealed class RemediationAgent : IRemediationAgent
            implementing a framework interface yourself, is a design decision.
         9. Code under src/main must not refer to test files or special-case
            tests in any way.
+        10. Never remove annotations that carry behaviour (@Cacheable,
+            @Transactional, @PreAuthorize, @Secured, @Async, @Scheduled,
+            @Valid and similar), and never change or delete the value of an
+            existing setting in a .properties or .yml file. You may rename a
+            key the target platform renamed, keeping its value, and add new
+            keys.
 
         Decisions:
         - Fix: edits that should make validation pass.
@@ -152,6 +158,23 @@ public sealed class RemediationAgent : IRemediationAgent
         foreach (var line in request.Diagnostics)
         {
             prompt.AppendLine(line);
+        }
+
+        if (request.UnsupportedLibraries.Count > 0)
+        {
+            prompt.AppendLine();
+            prompt.AppendLine("This repository uses libraries the target platform no longer supports:");
+
+            foreach (var library in request.UnsupportedLibraries)
+            {
+                prompt.AppendLine(
+                    $"- {library.Name} ({library.Package}); supported replacements: {library.Replacements}");
+            }
+
+            prompt.AppendLine(
+                "Edits that use these packages, or that work around them by removing annotations or changing " +
+                "settings, are rejected. If a failure comes from one of them, choose NeedsHumanDecision and " +
+                "list the replacements with what each would change.");
         }
 
         if (request.PreviousAttempts.Count > 0)

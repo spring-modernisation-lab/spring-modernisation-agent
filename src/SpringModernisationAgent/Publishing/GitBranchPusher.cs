@@ -50,11 +50,22 @@ public sealed partial class GitBranchPusher : IBranchPusher
     private readonly string _workspaceRoot;
     private readonly IReadOnlyDictionary<string, string> _environment;
     private readonly string _token;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+
+    /// <summary>Push attempts when GitHub answers with a server error.</summary>
+    public const int MaxPushAttempts = 3;
+
+    private static readonly string[] TransientPushErrors =
+    [
+        "Internal Server Error", "502", "503", "504", "Service Unavailable", "Bad Gateway",
+        "remote end hung up", "RPC failed", "Connection reset", "timed out"
+    ];
 
     public GitBranchPusher(
         IGitCommandRunner git,
         string workspaceRoot,
-        string token)
+        string token,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceRoot);
@@ -63,6 +74,7 @@ public sealed partial class GitBranchPusher : IBranchPusher
         _git = git;
         _workspaceRoot = workspaceRoot;
         _token = token;
+        _delay = delay ?? Task.Delay;
 
         var header = "AUTHORIZATION: basic " +
             Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{token}"));
@@ -112,9 +124,23 @@ public sealed partial class GitBranchPusher : IBranchPusher
                 "commit", "--quiet", "-m", message
             ], cancellationToken);
 
-            await RunAsync(directory, "push",
-                ["push", "--force", "--quiet", "origin", $"HEAD:refs/heads/{branch}"],
-                cancellationToken);
+            // GitHub sometimes answers a push with a server error (run 21).
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await RunAsync(directory, "push",
+                        ["push", "--force", "--quiet", "origin", $"HEAD:refs/heads/{branch}"],
+                        cancellationToken);
+                    break;
+                }
+                catch (InvalidOperationException exception)
+                    when (attempt < MaxPushAttempts
+                          && TransientPushErrors.Any(error => exception.Message.Contains(error, StringComparison.OrdinalIgnoreCase)))
+                {
+                    await _delay(TimeSpan.FromSeconds(5 * attempt), cancellationToken);
+                }
+            }
         }
         finally
         {

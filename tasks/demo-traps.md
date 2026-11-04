@@ -49,6 +49,15 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
 - **Response (code, not instructions):** two new guardrails reject AI edits that add a new type or make `src/main` code refer to test-only files, plus a "large new code" review flag. Replaying the real proposals: all four run 14 attempts are still accepted; run 16 attempt 2 is rejected (`adds new types (ExpiringCacheManager, ExpiringCache, ValueHolder, SimpleValueWrapper)`).
 - **Run 20** (`3b02f82`, up to 5 attempts, draft PRs on): **orders-service AttemptsExhausted, so no PR (correct). platform-parent got draft PR #1.** Attempts 1, 2 and 4 fixed traps 1–5. The agent **got around the "no new types" rule**: it made the existing `CacheConfiguration` `implements CacheManager` and returned an anonymous `new Cache() { ... }`, a 118-line Ehcache 2 adapter. It never got the caching test to pass (`expected: 3`), so Maven kept the outcome honest, but it never chose NeedsHumanDecision.
 - **Response:** the design guardrail now also rejects newly added anonymous classes and new supertypes on existing types. Generic arguments are ignored, so `UserType` → `UserType<Money>` is still allowed. Replay: run 14 attempts 1–4 and run 20 attempt 1 are accepted; run 20 attempt 2 (`adds anonymous classes (Cache)`) and attempt 3 (`adds anonymous classes (CacheManager)`) are rejected.
+- **Run 21** (`3b085f5`): **orders-service AttemptsExhausted again, so no PR.** A third workaround: attempt 3 **removed `@Cacheable`** and cached by hand against the Ehcache 2 API inside `InventoryClient` (no new type). Attempt 5 **set `spring.cache.type: none` in production**. The caching test still failed, so Maven blocked it. platform-parent's PR update failed with a GitHub `Internal Server Error` on push, and the step stayed green (continue-on-error).
+- **Response: guard what may not change, not the code shapes:**
+  - a list of unsupported libraries (Ehcache 2, Keycloak adapter, Springfox): AI edits may not add code using them, and the agent is told which ones the repo uses and to choose NeedsHumanDecision;
+  - no removing behaviour annotations (`@Cacheable`, `@Transactional`, `@PreAuthorize`, ...);
+  - no changing or deleting existing `.properties`/`.yml` values (renaming a key and adding keys are allowed);
+  - git push is retried on server errors;
+  - the job summary lists publishing failures.
+
+  Replay: run 14 is still fully accepted. Rejected: run 16 attempt 2, run 20 attempts 2–3, run 21 attempts 3–4 (Ehcache 2) and run 21 attempt 5 (`changes the setting spring.cache.type from 'ehcache' to 'none'`).
 
 Demo talking point: *Maven decided the build is green; review found two behaviour changes the tests do not cover. That is why the output is a draft PR with a reviewer summary, not a merge.*
 

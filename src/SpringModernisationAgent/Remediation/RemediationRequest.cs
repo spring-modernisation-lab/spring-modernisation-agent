@@ -7,7 +7,11 @@ public sealed record RemediationRequest(
     string JavaVersion,
     string FailedCheck,
     IReadOnlyList<string> Diagnostics,
-    IReadOnlyList<RemediationAttemptSummary> PreviousAttempts);
+    IReadOnlyList<RemediationAttemptSummary> PreviousAttempts)
+{
+    /// <summary>Libraries the repository uses that the target platform dropped.</summary>
+    public IReadOnlyList<UnsupportedLibrary> UnsupportedLibraries { get; init; } = [];
+}
 
 /// <summary>
 /// What happened to an earlier attempt in the same run, so the agent can

@@ -52,7 +52,8 @@ public sealed class PublishCommand
         var publisher = enabled ? CreatePublisher() : null;
         var organisation = Environment.GetEnvironmentVariable("GITHUB_ORGANISATION");
         var publications = new List<PullRequestPublication>();
-        var failures = 0;
+        var failures = new List<(string Repository, string Message)>();
+        var skipped = new List<string>();
 
         foreach (var result in results)
         {
@@ -76,6 +77,7 @@ public sealed class PublishCommand
             if (content is null)
             {
                 Console.WriteLine($"{repository}: no pull request (validation failed without a decision to make).");
+                skipped.Add(repository);
                 continue;
             }
 
@@ -108,7 +110,7 @@ public sealed class PublishCommand
             catch (Exception exception)
                 when (exception is not OperationCanceledException)
             {
-                failures++;
+                failures.Add((repository, exception.Message));
                 Console.Error.WriteLine($"{repository}: draft pull request failed: {exception.Message}");
             }
         }
@@ -120,10 +122,10 @@ public sealed class PublishCommand
                 JsonSerializer.Serialize(publications, JsonOptions),
                 cancellationToken);
 
-            await AppendJobSummaryAsync(publications, cancellationToken);
+            await AppendJobSummaryAsync(publications, failures, skipped, cancellationToken);
         }
 
-        if (failures > 0)
+        if (failures.Count > 0)
         {
             Environment.ExitCode = 1;
         }
@@ -201,24 +203,58 @@ public sealed class PublishCommand
 
     private static async Task AppendJobSummaryAsync(
         IReadOnlyList<PullRequestPublication> publications,
+        IReadOnlyList<(string Repository, string Message)> failures,
+        IReadOnlyList<string> skipped,
         CancellationToken cancellationToken)
     {
         var jobSummary = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
 
-        if (string.IsNullOrWhiteSpace(jobSummary) || publications.Count == 0)
+        if (string.IsNullOrWhiteSpace(jobSummary))
         {
             return;
         }
 
+        await File.AppendAllTextAsync(
+            jobSummary,
+            RenderJobSummary(publications, failures, skipped),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Every repository appears: its link, why it has no pull request, or the
+    /// publishing failure (the step itself stays green: continue-on-error).
+    /// </summary>
+    public static string RenderJobSummary(
+        IReadOnlyList<PullRequestPublication> publications,
+        IReadOnlyList<(string Repository, string Message)> failures,
+        IReadOnlyList<string> skipped)
+    {
         var markdown = new StringBuilder("\n## Draft pull requests\n\n");
 
         foreach (var publication in publications)
         {
             markdown.AppendLine(
-                $"- {publication.RepositoryName}: [#{publication.Number}]({publication.Url})" +
+                $"- ✅ {publication.RepositoryName}: [#{publication.Number}]({publication.Url}) " +
+                (publication.Created ? "opened" : "updated") +
                 (publication.NeedsDecision ? " — needs a decision" : string.Empty));
         }
 
-        await File.AppendAllTextAsync(jobSummary, markdown.ToString(), cancellationToken);
+        foreach (var (repository, message) in failures)
+        {
+            var firstLine = message.ReplaceLineEndings("\n").Split('\n')[0];
+            markdown.AppendLine($"- ⚠️ {repository}: **publishing failed**: {firstLine}");
+        }
+
+        foreach (var repository in skipped)
+        {
+            markdown.AppendLine($"- {repository}: no pull request (validation failed without a decision to make)");
+        }
+
+        if (publications.Count + failures.Count + skipped.Count == 0)
+        {
+            markdown.AppendLine("No repositories to publish.");
+        }
+
+        return markdown.ToString();
     }
 }

@@ -91,6 +91,50 @@ public class GitBranchPusherTests : IDisposable
         Assert.Empty(git.Commands);
     }
 
+    [Fact]
+    public async Task PushAsync_AServerErrorOnPush_IsRetriedUntilItSucceeds()
+    {
+        // Run 21: "[remote rejected] HEAD -> migration/... (Internal Server Error)".
+        var git = new RecordingGit
+        {
+            FailOn = "push",
+            FailTimes = 2,
+            FailureMessage = "remote: Internal Server Error\n ! [remote rejected] HEAD -> migration/x (Internal Server Error)"
+        };
+        var delays = new List<TimeSpan>();
+
+        await new GitBranchPusher(git, _root, Token, (delay, _) => { delays.Add(delay); return Task.CompletedTask; })
+            .PushAsync("spring-modernisation-lab", "platform-parent", Sha, "/p.patch", "migration/x", "m");
+
+        Assert.Equal(GitBranchPusher.MaxPushAttempts, git.Commands.Count(command => command.Arguments[0] == "push"));
+        Assert.Equal([TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)], delays);
+    }
+
+    [Fact]
+    public async Task PushAsync_ServerErrorsOnEveryAttempt_FailAfterTheLastOne()
+    {
+        var git = new RecordingGit { FailOn = "push", FailureMessage = "remote: Internal Server Error" };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new GitBranchPusher(git, _root, Token, (_, _) => Task.CompletedTask)
+                .PushAsync("spring-modernisation-lab", "platform-parent", Sha, "/p.patch", "migration/x", "m"));
+
+        Assert.Contains("git push failed", exception.Message);
+        Assert.Equal(GitBranchPusher.MaxPushAttempts, git.Commands.Count(command => command.Arguments[0] == "push"));
+    }
+
+    [Fact]
+    public async Task PushAsync_APermissionError_IsNotRetried()
+    {
+        var git = new RecordingGit { FailOn = "push", FailureMessage = "remote: Permission to x denied to y. 403" };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new GitBranchPusher(git, _root, Token, (_, _) => Task.CompletedTask)
+                .PushAsync("spring-modernisation-lab", "platform-parent", Sha, "/p.patch", "migration/x", "m"));
+
+        Assert.Single(git.Commands, command => command.Arguments[0] == "push");
+    }
+
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
     private sealed class RecordingGit : IGitCommandRunner
@@ -100,6 +144,11 @@ public class GitBranchPusherTests : IDisposable
         public string? FailOn { get; init; }
 
         public string FailureMessage { get; init; } = "failed";
+
+        /// <summary>How many times the FailOn command fails before it succeeds.</summary>
+        public int FailTimes { get; init; } = int.MaxValue;
+
+        private int _failures;
 
         public Task<MavenProcessResult> RunAsync(
             string workingDirectory,
@@ -115,7 +164,7 @@ public class GitBranchPusherTests : IDisposable
                 Directory.CreateDirectory(arguments[^1]);
             }
 
-            return Task.FromResult(arguments[0] == FailOn
+            return Task.FromResult(arguments[0] == FailOn && _failures++ < FailTimes
                 ? new MavenProcessResult(1, string.Empty, FailureMessage)
                 : new MavenProcessResult(0, string.Empty, string.Empty));
         }

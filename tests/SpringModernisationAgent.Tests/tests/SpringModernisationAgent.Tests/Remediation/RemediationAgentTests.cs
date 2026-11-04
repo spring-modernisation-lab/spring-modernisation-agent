@@ -157,6 +157,32 @@ public class RemediationAgentTests
             Edits: [ValidEdit()],
             Options: []);
 
+    [Fact]
+    public async Task ProposeAsync_UnsupportedLibrariesInTheRepository_AreNamedWithTheirReplacements()
+    {
+        var model = new FakeRemediationModel(ValidFix());
+        var ehcache = UnsupportedLibraries.All.Single(library => library.Package == "net.sf.ehcache");
+
+        await new RemediationAgent(model).ProposeAsync(
+            CreateRequest() with { UnsupportedLibraries = [ehcache] },
+            []);
+
+        Assert.Contains("Ehcache 2 (net.sf.ehcache)", model.Prompt);
+        Assert.Contains("Caffeine", model.Prompt);
+        Assert.Contains("choose NeedsHumanDecision", model.Prompt);
+        Assert.Contains("Never remove annotations that carry behaviour", model.Instructions);
+    }
+
+    [Fact]
+    public async Task ProposeAsync_NoUnsupportedLibraries_SaysNothingAboutThem()
+    {
+        var model = new FakeRemediationModel(ValidFix());
+
+        await new RemediationAgent(model).ProposeAsync(CreateRequest(), []);
+
+        Assert.DoesNotContain("no longer supports", model.Prompt);
+    }
+
     private sealed class FakeRemediationModel(
         RemediationProposal proposal,
         long? inputTokens = null,

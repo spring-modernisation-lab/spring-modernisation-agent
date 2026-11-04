@@ -14,6 +14,9 @@ namespace SpringModernisationAgent.Remediation;
 /// <item>Each search text must match exactly once; new files must not already exist.</item>
 /// <item>At most <see cref="MaxFiles"/> files and <see cref="MaxChangedLines"/> lines per proposal.</item>
 /// <item>No path may pass through a link.</item>
+/// <item>No new types, no references to test files, no code against
+/// <see cref="UnsupportedLibraries"/>, no removed behaviour annotations and
+/// no changed configuration values (see <c>RemediationPatchApplier.Behaviour.cs</c>).</item>
 /// </list>
 /// </summary>
 public sealed partial class RemediationPatchApplier
@@ -159,25 +162,43 @@ public sealed partial class RemediationPatchApplier
     }
 
     /// <summary>
-    /// Two rules on the resulting code, not just on paths:
-    /// no new types (fixing code is the agent's job, designing new components
-    /// is not), and production code must not refer to test-only files (a
-    /// sign it special-cases the test to make it pass).
+    /// Rules on the resulting code, not just on paths: settings keep their
+    /// values, no code against unsupported libraries, no new types (named,
+    /// anonymous or new supertypes: fixing code is the agent's job, designing
+    /// new components is not), production code must not refer to test-only
+    /// files (a sign it special-cases the test to make it pass), and no
+    /// behaviour annotations are removed.
     /// </summary>
     private static string? CheckDesign(
         string root,
         IReadOnlyDictionary<string, PendingFile> pending)
     {
         HashSet<string>? testOnlyNames = null;
+        var sources = new List<(string Before, string After)>();
 
         foreach (var (relativePath, file) in pending)
         {
             var extension = Path.GetExtension(relativePath);
 
+            var settingsError = CheckSettings(relativePath, file.OriginalContent, file.Content);
+
+            if (settingsError is not null)
+            {
+                return settingsError;
+            }
+
             if (extension is ".java" or ".kt")
             {
                 var before = StripCode(file.OriginalContent);
                 var after = StripCode(file.Content);
+                sources.Add((before, after));
+
+                var libraryError = CheckUnsupportedLibraries(relativePath, before, after);
+
+                if (libraryError is not null)
+                {
+                    return libraryError;
+                }
                 var added = TypeNames(after).Except(TypeNames(before), StringComparer.Ordinal).ToList();
 
                 if (added.Count > 0)
@@ -224,7 +245,7 @@ public sealed partial class RemediationPatchApplier
             }
         }
 
-        return null;
+        return CheckBehaviourAnnotations(sources);
     }
 
     /// <summary>Code without comments or string contents, so neither can hide or fake a declaration.</summary>

@@ -270,7 +270,7 @@ public class RemediationPatchApplierTests : IDisposable
     public void Apply_ResourceFile_IsAllowed()
     {
         var result = Apply(
-            Edit("src/main/resources/application.yml", "port: 8080", "port: 9090"));
+            Edit("src/main/resources/application.yml", "port: 8080", "port: 8080\n  shutdown: graceful"));
 
         Assert.True(result.Applied, result.RejectionReason);
     }
@@ -501,6 +501,138 @@ public class RemediationPatchApplierTests : IDisposable
         Assert.False(preview.Accepted);
         Assert.Empty(preview.Files);
         Assert.Equal(applied.RejectionReason, preview.RejectionReason);
+    }
+
+    private const string InventoryPath = "src/main/java/com/example/inventory/InventoryClient.java";
+
+    private const string InventorySource =
+        "package com.example.inventory;\n" +
+        "\n" +
+        "import org.springframework.cache.annotation.Cacheable;\n" +
+        "\n" +
+        "class InventoryClient {\n" +
+        "    @Cacheable(\"inventoryAvailability\")\n" +
+        "    public int availableQuantity(String sku) { return 1; }\n" +
+        "}\n";
+
+    private const string YamlPath = "src/main/resources/application-production.yml";
+
+    private const string YamlSource =
+        "spring:\n" +
+        "  cache:\n" +
+        "    type: ehcache\n" +
+        "    ehcache:\n" +
+        "      config: classpath:ehcache.xml\n";
+
+    [Fact]
+    public void Apply_CodeUsingAnUnsupportedLibrary_IsRejectedWithItsReplacements()
+    {
+        // Run 21 attempt 3's shape: caching written by hand against Ehcache 2.
+        var result = Apply(Edit(
+            ClientPath,
+            "builder.setMaxConnTotal(20);",
+            "builder.setMaxConnTotal(20); net.sf.ehcache.CacheManager.create();"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("uses Ehcache 2 (net.sf.ehcache)", result.RejectionReason);
+        Assert.Contains("NeedsHumanDecision", result.RejectionReason);
+        Assert.Contains("Caffeine", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_EditingAFileThatAlreadyUsesAnUnsupportedLibrary_IsAllowedWhenNoUseIsAdded()
+    {
+        Write(ClientPath, "import net.sf.ehcache.Element;\n\nclass InventoryClientConfiguration {\n    int size = 1;\n}\n");
+
+        var result = Apply(Edit(ClientPath, "int size = 1;", "int size = 2;"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_RemovingABehaviourAnnotation_IsRejected()
+    {
+        Write(InventoryPath, InventorySource);
+
+        var result = Apply(Edit(InventoryPath, "    @Cacheable(\"inventoryAvailability\")\n", "    // cached by hand\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("removes @Cacheable", result.RejectionReason);
+        Assert.Equal(InventorySource, Read(InventoryPath));
+    }
+
+    [Fact]
+    public void Apply_ChangingABehaviourAnnotationsArgumentsOrMovingIt_IsAllowed()
+    {
+        Write(InventoryPath, InventorySource);
+        Write("src/main/java/com/example/inventory/Other.java", "class Other {\n    void run() {}\n}\n");
+
+        var result = Apply(
+            Edit(InventoryPath, "@Cacheable(\"inventoryAvailability\")", "@org.springframework.cache.annotation.Cacheable(cacheNames = \"inventoryAvailability\")"),
+            Edit(SecurityPath, "    void configure() {}\n", "    @Transactional\n    void configure() {}\n"),
+            Edit("src/main/java/com/example/inventory/Other.java", "    void run() {}\n", "    @Transactional\n    void run() {}\n"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_ChangingAnExistingSettingsValue_IsRejected()
+    {
+        // Run 21 attempt 5: caching switched off in production.
+        Write(YamlPath, YamlSource);
+
+        var result = Apply(Edit(YamlPath, "type: ehcache", "type: none"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("changes the setting spring.cache.type from 'ehcache' to 'none'", result.RejectionReason);
+        Assert.Equal(YamlSource, Read(YamlPath));
+    }
+
+    [Fact]
+    public void Apply_RemovingAnExistingSetting_IsRejected()
+    {
+        Write(YamlPath, YamlSource);
+
+        var result = Apply(Edit(YamlPath, "    ehcache:\n      config: classpath:ehcache.xml\n", "    redis: {}\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("removes the setting spring.cache.ehcache.config", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_RenamingASettingKeepingItsValueOrAddingSettings_IsAllowed()
+    {
+        Write(YamlPath, "spring:\n  redis:\n    host: cache.internal\n");
+
+        var result = Apply(Edit(
+            YamlPath,
+            string.Empty,
+            "spring:\n  data:\n    redis:\n      host: cache.internal\n  main:\n    banner-mode: off\n"));
+
+        Assert.True(result.Applied, result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_ChangingAPropertiesValue_IsRejected()
+    {
+        const string path = "src/main/resources/application.properties";
+        Write(path, "# pool\ninventory.pool.max=50\n");
+
+        var result = Apply(Edit(path, "inventory.pool.max=50", "inventory.pool.max=5"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("changes the setting inventory.pool.max from '50' to '5'", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_EditThatBreaksYaml_IsRejected()
+    {
+        Write(YamlPath, YamlSource);
+
+        var result = Apply(Edit(YamlPath, "    type: ehcache\n", "    type: ehcache\n  bad: [unclosed\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("not valid YAML", result.RejectionReason);
     }
 
     public void Dispose()
