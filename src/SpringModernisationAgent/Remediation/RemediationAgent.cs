@@ -94,14 +94,18 @@ public sealed class RemediationAgent : IRemediationAgent
         - Fix: edits that should make validation pass.
         - NeedsHumanDecision: the only fix would change an external contract
           or behaviour, such as an HTTP API or URL matching, what a test
-          expects, or a dependency or its version. Leave Edits empty and put
-          each option, with its consequences, in Options.
+          expects, or a dependency or its version. Put each option, with its
+          consequences, in Options. Only list options that follow these
+          rules; never suggest re-implementing a dropped library or making
+          code behave differently under test.
         - CannotFix: no safe fix exists within these rules. Leave Edits empty
           and explain why in Diagnosis.
-        - If some problems can be fixed and others need a decision,
-          fix those first (decision Fix) and leave the rest for a later
-          attempt. Choose NeedsHumanDecision only when every remaining
-          problem needs a person.
+        - If some problems need a decision and others do not depend on it,
+          choose NeedsHumanDecision and still include, in Edits, the fixes
+          for the problems that do not depend on the decision (for example
+          a renamed package). They are checked, applied and validated in the
+          same way before the run stops for the decision. Leave Edits empty
+          only when every remaining problem needs a person.
         - If the target platform has dropped support for a library or an
           integration, do not re-implement the removed integration yourself
           and do not swap in a weaker substitute; choose NeedsHumanDecision
@@ -224,7 +228,7 @@ public sealed class RemediationAgent : IRemediationAgent
             case RemediationDecision.Fix when proposal.Edits.Count == 0:
                 throw new InvalidRemediationProposalException("A Fix proposal has no edits.");
 
-            case not RemediationDecision.Fix when proposal.Edits.Count > 0:
+            case RemediationDecision.CannotFix when proposal.Edits.Count > 0:
                 throw new InvalidRemediationProposalException(
                     $"A {proposal.Decision} proposal must not contain edits.");
 

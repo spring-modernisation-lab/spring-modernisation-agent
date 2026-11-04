@@ -43,7 +43,7 @@ public class RemediationAgentTests
         Assert.Contains("files of up to 400 lines", model.Instructions);
         Assert.Contains("describe_class", model.Instructions);
         Assert.Contains("never guess", model.Instructions);
-        Assert.Contains("fix those first", model.Instructions);
+        Assert.Contains("do not depend on the decision", model.Instructions);
         Assert.Contains("do not re-implement", model.Instructions);
         Assert.Contains("Do not add new classes", model.Instructions);
         Assert.Contains("must not refer to test files", model.Instructions);
@@ -81,6 +81,22 @@ public class RemediationAgentTests
             .ProposeAsync(CreateRequest(), []);
 
         Assert.Equal(RemediationDecision.NeedsHumanDecision, result.Proposal.Decision);
+    }
+
+    [Fact]
+    public async Task ProposeAsync_NeedsHumanDecisionWithFixesForIndependentProblems_IsAccepted()
+    {
+        var model = new FakeRemediationModel(ValidFix() with
+        {
+            Decision = RemediationDecision.NeedsHumanDecision,
+            Options = ["Ehcache 3 through JCache", "Caffeine"]
+        });
+
+        var result = await new RemediationAgent(model).ProposeAsync(CreateRequest(), []);
+
+        Assert.Single(result.Proposal.Edits);
+        Assert.Contains("still include, in Edits, the fixes", model.Instructions);
+        Assert.Contains("never suggest re-implementing a dropped library", model.Instructions);
     }
 
     public static TheoryData<RemediationProposal, string> InvalidProposals() => new()

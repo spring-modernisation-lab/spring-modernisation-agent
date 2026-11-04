@@ -59,6 +59,17 @@ The "Expected" column is a **hypothesis**. The OpenRewrite probe (`.github/workf
 
   Replay: run 14 is still fully accepted. Rejected: run 16 attempt 2, run 20 attempts 2–3, run 21 attempts 3–4 (Ehcache 2) and run 21 attempt 5 (`changes the setting spring.cache.type from 'ehcache' to 'none'`).
 
+- **Run 22** (`de47e65`): **trap 6 worked. orders-service stopped with NeedsHumanDecision after 2 attempts and got draft PR #1 `[Needs decision]`.** platform-parent's PR #1 was updated.
+  - Attempt 1 fixed the compile errors; the security rewrite kept both users, their roles, the `/h2-console/**` ignore and the `AuthenticationManager`.
+  - Attempt 2 named Ehcache 2 as the cause and listed Ehcache 3/JCache, Caffeine and Redis.
+  - Two gaps:
+    - It left the `javax.servlet` check (trap 3) unfixed, although its own diagnosis named the fix, because a decision could not carry edits.
+    - One AI option suggested hand-writing an in-memory cache "for tests", which the rules forbid.
+- **Response:**
+  - A NeedsHumanDecision proposal may now include fixes for problems that do not depend on the decision. They pass the same guardrails and are validated once, then the run stops for the decision.
+  - The instructions forbid options that break the rules.
+  - From `7c435f0`, the PR also lists the pipeline's fixed manual steps for unsupported libraries.
+
 Demo talking point: *Maven decided the build is green; review found two behaviour changes the tests do not cover. That is why the output is a draft PR with a reviewer summary, not a merge.*
 
 ## Demo talking point (from run 4)

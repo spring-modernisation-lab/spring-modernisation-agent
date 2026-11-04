@@ -198,6 +198,57 @@ public class RemediationLoopTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_DecisionWithIndependentFixes_AppliesAndValidatesThemOnceThenStops()
+    {
+        // Run 22: the agent knew the javax-to-jakarta fix but could not send it with its decision.
+        var proposal = Fix(" extends WebSecurityConfigurerAdapter", "") with
+        {
+            Decision = RemediationDecision.NeedsHumanDecision,
+            Options = ["Ehcache 3 through JCache", "Caffeine"]
+        };
+
+        var agent = new FakeAgent(proposal, Fix("never", "asked"));
+        var maven = new FakeMaven(Passed(), Failed("[ERROR] Tests run: 1, Failures: 1"));
+
+        var result = await CreateLoop(agent, maven).RunAsync(
+            CreatePlan(), CreateWorkspace(), "tree-openrewrite", OpenRewritePatchPath, FailedCompile());
+
+        Assert.Equal(RemediationOutcome.NeedsHumanDecision, result.Report.Outcome);
+        Assert.Single(agent.Requests);
+
+        var attempt = Assert.Single(result.Report.Attempts);
+        Assert.True(attempt.Applied);
+        Assert.Equal("02-remediation-attempt-1", attempt.Patch!.Stage);
+        Assert.False(attempt.Validation!.Passed);
+        Assert.Same(attempt.Validation, result.FinalValidation);
+        Assert.Equal(["02-remediation-attempt-1"], result.AttemptPatches.Select(patch => patch.Stage));
+        Assert.Equal("class SecurityConfiguration {}\n", Read(SecurityPath));
+    }
+
+    [Fact]
+    public async Task RunAsync_DecisionWhoseFixesTheGuardrailsReject_StillStopsForTheDecision()
+    {
+        var proposal = Fix("class Missing", "x") with
+        {
+            Decision = RemediationDecision.NeedsHumanDecision,
+            Options = ["Option A"]
+        };
+
+        var maven = new FakeMaven();
+
+        var result = await CreateLoop(new FakeAgent(proposal), maven).RunAsync(
+            CreatePlan(), CreateWorkspace(), "tree-openrewrite", OpenRewritePatchPath, FailedCompile());
+
+        Assert.Equal(RemediationOutcome.NeedsHumanDecision, result.Report.Outcome);
+        Assert.Empty(maven.Calls);
+
+        var attempt = Assert.Single(result.Report.Attempts);
+        Assert.False(attempt.Applied);
+        Assert.Contains("not found", attempt.RejectionReason);
+        Assert.Equal("class SecurityConfiguration extends WebSecurityConfigurerAdapter {}\n", Read(SecurityPath));
+    }
+
+    [Fact]
     public async Task RunAsync_SameFailureAfterAFix_StopsWithNoProgress()
     {
         var agent = new FakeAgent(

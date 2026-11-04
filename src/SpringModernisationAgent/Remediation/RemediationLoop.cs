@@ -194,10 +194,15 @@ public sealed class RemediationLoop : IRemediationLoop
                     run.Add(attempt);
                     return run.Finish(RemediationOutcome.CannotFix);
 
-                case RemediationDecision.NeedsHumanDecision:
+                case RemediationDecision.NeedsHumanDecision when proposed.Proposal.Edits.Count == 0:
                     run.Add(attempt);
                     return run.Finish(RemediationOutcome.NeedsHumanDecision);
             }
+
+            // A decision can come with fixes for the problems that do not
+            // depend on it (run 22 left a known javax-to-jakarta fix undone).
+            // They are applied and validated once, then the loop stops.
+            var decisionNeeded = proposed.Proposal.Decision == RemediationDecision.NeedsHumanDecision;
 
             var applied = _applier.Apply(workspace.RepositoryPath, proposed.Proposal.Edits);
 
@@ -205,6 +210,12 @@ public sealed class RemediationLoop : IRemediationLoop
             {
                 _progress.Report(repository, $"attempt {number}: guardrails rejected: {applied.RejectionReason}");
                 run.Add(attempt with { RejectionReason = applied.RejectionReason });
+
+                if (decisionNeeded)
+                {
+                    return run.Finish(RemediationOutcome.NeedsHumanDecision);
+                }
+
                 run.Feedback.Add(new RemediationAttemptSummary(
                     number,
                     "Rejected by the guardrails; nothing was changed",
@@ -253,6 +264,11 @@ public sealed class RemediationLoop : IRemediationLoop
                 Validation = next
             });
             run.Validation = next;
+
+            if (decisionNeeded)
+            {
+                return run.Finish(RemediationOutcome.NeedsHumanDecision);
+            }
 
             if (next.Passed)
             {
