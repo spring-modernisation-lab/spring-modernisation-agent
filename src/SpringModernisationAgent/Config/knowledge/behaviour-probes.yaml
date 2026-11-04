@@ -1,0 +1,50 @@
+# What the behaviour probe records, besides what it discovers itself
+# (docs/system-design.md §3). Discovered from the repository, not configured:
+#   - profiles: "default" plus each application-<profile>.yml/.properties;
+#   - settings: every key in application*.yml/.properties under src/main/resources;
+#   - roles: hasRole/hasAnyRole/hasAuthority/@Secured names in src/main/java,
+#     probed with spring-security-test when the repository has it;
+#   - endpoints: the application's own request mappings, at runtime.
+#
+# Bean values are found by searching each matching bean's object graph for
+# the first meaningful value of one of the named fields. Field names differ
+# between library versions (HttpClient 4 and 5), so each item lists the
+# names both use; ":ms"/":s"/":ns" give the unit of a bare number. Times are
+# compared in milliseconds.
+#
+# An item the probe cannot read on a correctly migrated application would be
+# a false difference: every item here is verified on the baseline and on a
+# known-good migration (run 14) before it is trusted.
+
+beans:
+  - id: HttpClient.maxTotal
+    startTypes: [CloseableHttpClient]
+    fields: [maxTotal]
+
+  - id: HttpClient.maxPerRoute
+    startTypes: [CloseableHttpClient]
+    fields: [defaultMaxPerRoute]
+
+  - id: HttpClient.connectionTimeToLive
+    startTypes: [CloseableHttpClient]
+    fields: [timeToLive]
+
+  - id: HttpClient.idleEviction
+    startTypes: [CloseableHttpClient]
+    fields: [maxIdleTimeMs, maxIdleTime]
+
+  - id: HttpClient.connectTimeout
+    startTypes: [CloseableHttpClient]
+    fields: ["connectTimeout:ms"]
+
+  - id: HttpClient.connectionRequestTimeout
+    startTypes: [CloseableHttpClient]
+    fields: ["connectionRequestTimeout:ms"]
+
+  - id: HttpClient.responseTimeout
+    startTypes: [CloseableHttpClient]
+    fields: ["socketTimeout:ms", "responseTimeout:ms"]
+
+caches:
+  timeToLiveFields: [timeToLiveSeconds, timeToLive, "expireAfterWriteNanos:ns"]
+  maxEntriesFields: [maxEntriesLocalHeap, maximumSize, maximum, maxEntries]

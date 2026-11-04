@@ -67,6 +67,16 @@ try
                 break;
             }
 
+        case "behaviour":
+            {
+                Environment.ExitCode =
+                    await new BehaviourCommand().ExecuteAsync(
+                        args.Skip(1).ToList(),
+                        cancellationToken);
+
+                break;
+            }
+
         case "help":
         case "--help":
         case "-h":

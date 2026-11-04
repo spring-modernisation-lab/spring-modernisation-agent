@@ -1,0 +1,2 @@
+# Recorded patches are evidence: never convert their line endings.
+tests/fixtures/**/*.patch -text

@@ -23,6 +23,19 @@ on:
           only, never part of a route.
         required: false
         default: ""
+      behaviour-contract:
+        description: >-
+          Record the behaviour contract on the Boot 2.7 baseline and after
+          migration, and compare them
+        type: boolean
+        default: false
+      after-patch:
+        description: >-
+          Optional known migrated tree to compare instead of the recipes'
+          output: a cumulative patch in this repository, for example
+          tests/fixtures/orders-service/R23-cumulative.patch
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -71,6 +84,27 @@ jobs:
           set -o pipefail
           mvn --batch-mode verify 2>&1 | tee "$OUTPUT_DIR/baseline-build.log"
           mvn --batch-mode --quiet clean
+
+      - name: Set up .NET (behaviour contract)
+        if: inputs.behaviour-contract
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build migration application (behaviour contract)
+        if: inputs.behaviour-contract
+        working-directory: agent
+        run: dotnet build ./src/SpringModernisationAgent --configuration Release
+
+      # Java 11 is still active: this is the Boot 2.7 application's behaviour.
+      - name: Record baseline behaviour
+        if: inputs.behaviour-contract
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+        run: >
+          dotnet run --project agent/src/SpringModernisationAgent --configuration Release --no-build --
+          behaviour record "$GITHUB_WORKSPACE/repo" "$REPOSITORY"
+          "$(cat "$OUTPUT_DIR/source-commit.txt")" "$OUTPUT_DIR/behaviour-baseline.json"
 
       - name: Set up Java 21 (target)
         uses: actions/setup-java@v5
@@ -176,6 +210,26 @@ jobs:
           git diff --cached --stat | tee "$OUTPUT_DIR/candidates-diffstat.txt"
           git diff --cached --binary > "$OUTPUT_DIR/candidates.patch"
 
+      # Verification aid: compare a known migrated tree (for example a past
+      # run's cumulative patch) instead of the recipes' output.
+      - name: Apply known migrated tree
+        if: inputs.after-patch != ''
+        working-directory: repo
+        env:
+          AFTER_PATCH: ${{ inputs.after-patch }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$AFTER_PATCH" =~ ^tests/fixtures/[A-Za-z0-9_./-]+\.patch$ ]] || [[ "$AFTER_PATCH" == *..* ]]; then
+            echo "::error::after-patch must be a .patch under tests/fixtures/"
+            exit 1
+          fi
+
+          git reset --quiet --hard "$(cat "$OUTPUT_DIR/source-commit.txt")"
+          git clean -fdq -e target
+          git apply "$GITHUB_WORKSPACE/agent/$AFTER_PATCH"
+          echo "Applied $AFTER_PATCH to the source commit" | tee "$OUTPUT_DIR/after-patch.txt"
+
       - name: Capture OpenRewrite changes
         working-directory: repo
         run: |
@@ -201,6 +255,24 @@ jobs:
 
           # A failed build is the expected finding, not a probe failure.
           exit 0
+
+      # Java 21 is active: the migrated application's behaviour.
+      - name: Record behaviour after migration
+        if: inputs.behaviour-contract
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+        run: >
+          dotnet run --project agent/src/SpringModernisationAgent --configuration Release --no-build --
+          behaviour record "$GITHUB_WORKSPACE/repo" "$REPOSITORY"
+          "$(cat "$OUTPUT_DIR/source-commit.txt")" "$OUTPUT_DIR/behaviour-after.json"
+
+      # A broken contract is a finding, not a probe failure.
+      - name: Compare behaviour
+        if: inputs.behaviour-contract
+        run: |
+          dotnet run --project agent/src/SpringModernisationAgent --configuration Release --no-build -- \
+            behaviour compare "$OUTPUT_DIR/behaviour-baseline.json" "$OUTPUT_DIR/behaviour-after.json" \
+            | tee "$OUTPUT_DIR/behaviour-comparison.md" || true
 
       - name: Summarise findings
         if: always()
