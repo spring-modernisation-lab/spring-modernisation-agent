@@ -408,7 +408,7 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
 - **Deferred to 8.4b:** AI diagnosis of `K-UNKNOWN` problems (no edits, it proposes a kind and mapping). No recorded run has an unknown problem left, so 8.4 sends unknowns straight to a person.
 
 **Steps (each test-first, committed separately):**
-- [ ] **1. Knowledge.**
+- [x] **1. Knowledge.** (`obligations:` on Security `B-SEC-*` and HttpClient `B-BEAN-*-HttpClient.*`, none on Hibernate; `behaviour-signatures.yaml` with `BS-TRAILING-SLASH`; 15 tests.)
   - `obligations:` on each mapping, validated: patterns compile, and a mapping with none is allowed but listed.
   - `behaviour-signatures` (item pattern + value change → kind, `seenIn`), starting with `B-SEC-*` trailing slash → 404 = contract (R26).
   - `ProblemKnowledge` loads and validates both.

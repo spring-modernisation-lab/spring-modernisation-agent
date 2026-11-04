@@ -1,9 +1,13 @@
 # Known API moves the AI ports, one scoped task at a time (docs/system-design.md §4.1).
 #
 # Each mapping gives the AI checked notes on the target API, and names the
-# behaviour the port must keep. `mustKeep` entries become behaviour-contract
-# items in 8.2 and are checked after every port; until then they are given
-# to the AI and shown to the reviewer.
+# behaviour the port must keep, twice:
+#   mustKeep     - in words, for the AI and the reviewer;
+#   obligations  - as behaviour-contract item globs (`*` matches anything).
+#                  Once everything compiles, a port whose obligations are no
+#                  longer `same` is repaired once, then reverted (§4.1).
+#                  Something in mustKeep that the probe cannot read has no
+#                  obligation, and the port is judged without it.
 #
 # Notes are written from the APIs as published (checked with describe_class
 # where a run needed it) and from what the runs got wrong.
@@ -20,6 +24,8 @@ mappings:
       - "every user and role"
       - "ignored paths (/h2-console/**)"
       - "who may call each endpoint and method"
+    obligations:
+      - "B-SEC-*"
 
   - id: M-HIBERNATE-6-USERTYPE
     name: "Hibernate 6: generic UserType<T>"
@@ -32,6 +38,7 @@ mappings:
     mustKeep:
       - "the stored column format (\"amount currency\")"
       - "null handling on read and write"
+    # No obligations: the probe does not read the stored column format yet.
 
   - id: M-HTTPCLIENT-5-POOL
     name: "Apache HttpClient 5: pool and connection settings"
@@ -45,3 +52,5 @@ mappings:
       - "connection time-to-live"
       - "idle-connection eviction"
       - "request timeouts"
+    obligations:
+      - "B-BEAN-*-HttpClient.*"

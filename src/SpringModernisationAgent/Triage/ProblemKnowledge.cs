@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using SpringModernisationAgent.Behaviour;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -44,11 +45,50 @@ public sealed record DiagnosticSignature(
 }
 
 /// <summary>A known API move from <c>api-mappings.yaml</c>: notes for the AI and what the port must keep.</summary>
+/// <param name="MustKeep">What the port must keep, in words, for the AI and the reviewer.</param>
+/// <param name="Obligations">
+/// The same as behaviour-contract item globs (<c>B-BEAN-*-HttpClient.*</c>):
+/// a port is accepted only if these items are unchanged.
+/// </param>
 public sealed record ApiMapping(
     string Id,
     string Name,
     IReadOnlyList<string> Notes,
-    IReadOnlyList<string> MustKeep);
+    IReadOnlyList<string> MustKeep,
+    IReadOnlyList<string> Obligations)
+{
+    private readonly Regex[] _obligations = Obligations.Select(Glob).ToArray();
+
+    /// <summary>Whether a port of this mapping must keep this contract item.</summary>
+    public bool Obliges(
+        string item) =>
+        _obligations.Any(pattern => pattern.IsMatch(item));
+
+    private static Regex Glob(
+        string glob) =>
+        new("^" + string.Join(".*", glob.Split('*').Select(Regex.Escape)) + "$", RegexOptions.CultureInvariant);
+}
+
+/// <summary>
+/// One rule from <c>behaviour-signatures.yaml</c>: a behaviour difference the
+/// platform causes, whatever a port does (for example Spring 6 no longer
+/// matching a trailing slash). Such a difference is a decision, never held
+/// against a port.
+/// </summary>
+public sealed record BehaviourSignature(
+    string Id,
+    ProblemKind Kind,
+    Regex Item,
+    Regex? Before,
+    Regex? After,
+    string Reason)
+{
+    public bool Matches(
+        ContractDifference difference) =>
+        Item.IsMatch(difference.Item)
+        && (Before is null || Before.IsMatch(difference.Before))
+        && (After is null || After.IsMatch(difference.After ?? string.Empty));
+}
 
 /// <summary>
 /// The signatures and API mappings, validated together: every mapping,
@@ -59,6 +99,7 @@ public sealed partial class ProblemKnowledge
 {
     public const string SignaturesRelativePath = "Config/knowledge/diagnostic-signatures.yaml";
     public const string MappingsRelativePath = "Config/knowledge/api-mappings.yaml";
+    public const string BehaviourSignaturesRelativePath = "Config/knowledge/behaviour-signatures.yaml";
 
     private static readonly Dictionary<string, ProblemKind> Kinds = new(StringComparer.Ordinal)
     {
@@ -71,15 +112,28 @@ public sealed partial class ProblemKnowledge
 
     public ProblemKnowledge(
         IReadOnlyList<DiagnosticSignature> signatures,
-        IReadOnlyDictionary<string, ApiMapping> mappings)
+        IReadOnlyDictionary<string, ApiMapping> mappings,
+        IReadOnlyList<BehaviourSignature>? behaviourSignatures = null)
     {
         Signatures = signatures;
         Mappings = mappings;
+        BehaviourSignatures = behaviourSignatures ?? [];
     }
 
     public IReadOnlyList<DiagnosticSignature> Signatures { get; }
 
     public IReadOnlyDictionary<string, ApiMapping> Mappings { get; }
+
+    public IReadOnlyList<BehaviourSignature> BehaviourSignatures { get; }
+
+    /// <summary>The first behaviour signature that explains a difference, or null.</summary>
+    public BehaviourSignature? Explain(
+        ContractDifference difference)
+    {
+        ArgumentNullException.ThrowIfNull(difference);
+
+        return BehaviourSignatures.FirstOrDefault(signature => signature.Matches(difference));
+    }
 
     /// <summary>
     /// The files shipped with the application. Mechanical signatures may name
@@ -97,11 +151,14 @@ public sealed partial class ProblemKnowledge
                 .ToHashSet(StringComparer.Ordinal)
             : [];
 
+        var behaviour = Path.Combine(root, BehaviourSignaturesRelativePath);
+
         return Parse(
             File.ReadAllText(Path.Combine(root, SignaturesRelativePath)),
             File.ReadAllText(Path.Combine(root, MappingsRelativePath)),
             knownLibraries,
-            knownRecipes);
+            knownRecipes,
+            File.Exists(behaviour) ? File.ReadAllText(behaviour) : null);
     }
 
     [GeneratedRegex(@"(?m)^name:\s*(\S+)\s*$")]
@@ -109,11 +166,13 @@ public sealed partial class ProblemKnowledge
 
     /// <param name="knownLibraries">Library names in the unsupported-libraries catalogue.</param>
     /// <param name="knownRecipes">Recipe names a mechanical signature may name (the pipeline recipes).</param>
+    /// <param name="behaviourYaml">The behaviour signatures, if any.</param>
     public static ProblemKnowledge Parse(
         string signaturesYaml,
         string mappingsYaml,
         IReadOnlyCollection<string> knownLibraries,
-        IReadOnlyCollection<string> knownRecipes)
+        IReadOnlyCollection<string> knownRecipes,
+        string? behaviourYaml = null)
     {
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
@@ -130,8 +189,10 @@ public sealed partial class ProblemKnowledge
             Require(!string.IsNullOrWhiteSpace(entry.Name), label, "needs a name");
             Require(entry.Notes is { Count: > 0 }, label, "needs at least one note");
             Require(!mappings.ContainsKey(entry.Id!), label, "duplicates another mapping's id");
+            Require((entry.Obligations ?? []).All(glob => glob.StartsWith("B-", StringComparison.Ordinal)), label,
+                "obligations must be contract item patterns starting with B-");
 
-            mappings[entry.Id!] = new ApiMapping(entry.Id!, entry.Name!, entry.Notes!, entry.MustKeep ?? []);
+            mappings[entry.Id!] = new ApiMapping(entry.Id!, entry.Name!, entry.Notes!, entry.MustKeep ?? [], entry.Obligations ?? []);
         }
 
         var signaturesFile = Read<SignaturesFile>(deserializer, signaturesYaml, "diagnostic-signatures.yaml");
@@ -156,25 +217,62 @@ public sealed partial class ProblemKnowledge
             Require(kind != ProblemKind.PlatformDropped || (entry.Library is not null && knownLibraries.Contains(entry.Library)), label,
                 "is platform-dropped, so it needs a library from unsupported-libraries.yaml");
 
-            var patterns = new List<Regex>();
-
-            foreach (var pattern in entry.Pattern ?? [])
-            {
-                try
-                {
-                    patterns.Add(new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)));
-                }
-                catch (ArgumentException exception)
-                {
-                    throw new InvalidOperationException($"{label} has an invalid pattern '{pattern}': {exception.Message}");
-                }
-            }
+            var patterns = (entry.Pattern ?? []).Select(pattern => Compile(pattern, label)).ToList();
 
             signatures.Add(new DiagnosticSignature(
                 entry.Id!, kind, entry.Mapping, entry.Recipe, entry.Library, entry.Contains ?? [], patterns));
         }
 
-        return new ProblemKnowledge(signatures, mappings);
+        return new ProblemKnowledge(signatures, mappings, ParseBehaviour(deserializer, behaviourYaml));
+    }
+
+    private static List<BehaviourSignature> ParseBehaviour(
+        IDeserializer deserializer,
+        string? yaml)
+    {
+        var signatures = new List<BehaviourSignature>();
+
+        if (yaml is null)
+        {
+            return signatures;
+        }
+
+        var file = Read<BehaviourSignaturesFile>(deserializer, yaml, "behaviour-signatures.yaml");
+
+        foreach (var (entry, index) in (file?.Signatures ?? []).Select((entry, index) => (entry, index + 1)))
+        {
+            var label = $"behaviour-signatures.yaml: signature {index} ('{entry.Id ?? "?"}')";
+
+            Require(entry.Id is { Length: > 0 } && entry.Id.StartsWith("BS-", StringComparison.Ordinal), label, "needs an id starting with BS-");
+            Require(signatures.All(signature => signature.Id != entry.Id), label, "duplicates another signature's id");
+            Require(entry.Kind is "contract" or "platform-dropped", label, "needs a kind: contract, platform-dropped");
+            Require(!string.IsNullOrWhiteSpace(entry.Item), label, "needs an item pattern");
+            Require(!string.IsNullOrWhiteSpace(entry.Reason), label, "needs a reason");
+
+            signatures.Add(new BehaviourSignature(
+                entry.Id!,
+                Kinds[entry.Kind!],
+                Compile(entry.Item!, label),
+                entry.Before is null ? null : Compile(entry.Before, label),
+                entry.After is null ? null : Compile(entry.After, label),
+                entry.Reason!));
+        }
+
+        return signatures;
+    }
+
+    private static Regex Compile(
+        string pattern,
+        string label)
+    {
+        try
+        {
+            return new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidOperationException($"{label} has an invalid pattern '{pattern}': {exception.Message}");
+        }
     }
 
     private static T? Read<T>(
@@ -242,5 +340,30 @@ public sealed partial class ProblemKnowledge
         public List<string>? Notes { get; set; }
 
         public List<string>? MustKeep { get; set; }
+
+        public List<string>? Obligations { get; set; }
+    }
+
+    private sealed class BehaviourSignaturesFile
+    {
+        public List<BehaviourSignatureEntry>? Signatures { get; set; }
+    }
+
+    private sealed class BehaviourSignatureEntry
+    {
+        public string? Id { get; set; }
+
+        public string? Kind { get; set; }
+
+        public string? Item { get; set; }
+
+        public string? Before { get; set; }
+
+        public string? After { get; set; }
+
+        public string? Reason { get; set; }
+
+        /// <summary>The runs it was written from (documentation).</summary>
+        public List<string>? SeenIn { get; set; }
     }
 }

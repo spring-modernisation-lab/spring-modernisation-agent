@@ -1,0 +1,23 @@
+# Behaviour differences the platform causes, whatever a port does
+# (docs/system-design.md §4, §4.1).
+#
+# The behaviour contract compares the migrated application with the
+# baseline. A difference that matches one of these is the platform's doing:
+# it goes to a person as a decision of the given kind, and is never held
+# against a scoped port's obligations. Anything unexplained in a port's
+# obligations counts against the port.
+#
+# Matching (regular expressions): `item` against the contract item ID; the
+# optional `before` and `after` against its values. All given must match.
+#
+# Kinds: contract (an HTTP status or URL changed) or platform-dropped.
+
+signatures:
+  - id: BS-TRAILING-SLASH
+    kind: contract
+    # B-SEC-<profile>-<METHOD> /path/-<ROLE>: the variant with a trailing slash.
+    item: '^B-SEC-.+ /\S*/-[^-]+$'
+    before: '^(?!404$)'
+    after: '^404$'
+    reason: "Spring Framework 6 no longer matches a path with a trailing slash to a mapping without one. Keep the old URLs (an explicit mapping or a redirect) or retire them: a decision, not a port."
+    seenIn: [R14, R20, R26, P7]
