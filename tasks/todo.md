@@ -425,12 +425,12 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
   - `PortRequest`: the task, its mapping's notes, `mustKeep`, its obligations with their baseline values, its files, its evidence, and on a repair the exact failure.
   - Instructions rewritten for one task. Read tools stay repo-wide (reading is harmless and helps); `preview_edits` uses the task's scope.
   - Decision: Fix or CannotFix.
-- [ ] **7. `PortRunner` replaces `RemediationLoop`.**
+- [x] **7. `PortRunner` replaces `RemediationLoop`.** (8 tests on a real git workspace: three scoped tasks kept; a repair given the exact failure; reverted to the recipes' output; CannotFix with no repair; an out-of-scope edit rejected; the contract gate catching a TTL lost twice and reverting it with a recorded revert patch, while the trailing slash is not blamed on security; decisions never become tasks; agent failure stops the run. The coordinator reuses the gate's comparison when nothing changed after it.)
   - Loop: classify → plan → next task → attempt → apply → record → validate → reclassify → judge. If rejected, one repair with the failure as feedback; if still rejected, restore and send it to a person. Then the next task, until none can be worked.
   - Then the contract gate (when compile passes and a baseline exists): repair each task that broke an obligation once, re-check, and restore the ones still broken.
   - It reports tasks (status Accepted / Reverted / CannotFix / NotAttempted, with reasons) and every attempt with its task id.
   - The coordinator calls it where the loop was; its last behaviour comparison is reused, not recomputed, when nothing changed after it.
-- [ ] **8. Remove the old loop:** `RemediationLoop`, `remediation-max-attempts`, `MIGRATION_REMEDIATION_MAX_ATTEMPTS`, `RemediationSettings`. The bounds are fixed: one attempt plus one repair per task, at most 2 probe runs.
+- [x] **8. Remove the old loop:** `RemediationLoop`, `remediation-max-attempts`, `MIGRATION_REMEDIATION_MAX_ATTEMPTS`, `RemediationSettings`. The bounds are fixed: one attempt plus one repair per task, at most 2 probe runs.
 - [ ] **9. Reporting.** Job summary and PR: a tasks table (mapping, files, attempts, status, why; obligations kept / broken / unchecked), attempts listed under their task, and reverted ports shown as "attempted, reverted: needs a person". README "What the AI may and may not do" and the diagram updated.
 - [ ] **10. Verify.**
   - Unit tests: planning, grouping, acceptance (including revealed errors), revert, ordering, closing, and the contract gate with a platform-explained difference.

@@ -69,3 +69,12 @@ internal static class RemediationProposalValidator
         return proposal;
     }
 }
+
+public sealed record RemediationAgentResult(
+    RemediationProposal Proposal,
+    long? InputTokens,
+    long? OutputTokens);
+
+/// <summary>The model's answer was not a usable proposal; the attempt fails.</summary>
+public sealed class InvalidRemediationProposalException(string message)
+    : Exception(message);

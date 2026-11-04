@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using SpringModernisationAgent.Porting;
 using SpringModernisationAgent.Remediation;
@@ -100,6 +101,67 @@ public class PortAgentTests
             () => new PortAgent(model).ProposeAsync(Request, []));
 
         Assert.Contains("Fix or CannotFix", exception.Message);
+    }
+
+    public static TheoryData<RemediationProposal, string> InvalidProposals() => new()
+    {
+        { ValidFix() with { Edits = [] }, "Fix proposal has no edits" },
+        { ValidFix() with { Decision = RemediationDecision.CannotFix }, "must not contain edits" },
+        { ValidFix() with { Diagnosis = " " }, "diagnosis" },
+        { ValidFix() with { RootCause = "" }, "root cause" },
+        { ValidFix() with { Edits = [ValidEdit() with { Path = "" }] }, "edit 1 has no path" },
+        { ValidFix() with { Edits = [ValidEdit() with { Rationale = "" }] }, "edit 1 has no rationale" },
+        {
+            ValidFix() with { Edits = [ValidEdit() with { Search = "", Replace = "" }] },
+            "edit 1 changes nothing"
+        },
+        {
+            ValidFix() with { Edits = [ValidEdit() with { Search = "same", Replace = "same" }] },
+            "edit 1 changes nothing"
+        }
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidProposals))]
+    public async Task ProposeAsync_InvalidProposal_Throws(
+        RemediationProposal proposal,
+        string expectedMessage)
+    {
+        var exception = await Assert.ThrowsAsync<InvalidRemediationProposalException>(
+            () => new PortAgent(new FakeModel(proposal)).ProposeAsync(Request, []));
+
+        Assert.Contains(expectedMessage, exception.Message);
+    }
+
+    [Fact]
+    public void Decision_SerialisesAsItsName()
+    {
+        // Structured output relies on the schema using names, not numbers.
+        Assert.Equal(
+            "\"NeedsHumanDecision\"",
+            JsonSerializer.Serialize(RemediationDecision.NeedsHumanDecision));
+    }
+
+    private static RemediationEdit ValidEdit() =>
+        new(
+            Path: "src/main/java/com/example/SecurityConfiguration.java",
+            Search: " extends WebSecurityConfigurerAdapter",
+            Replace: "",
+            Rationale: "The adapter was removed in Spring Security 6.");
+
+    private static RemediationProposal ValidFix() =>
+        new(
+            Decision: RemediationDecision.Fix,
+            Diagnosis: "SecurityConfiguration still extends the removed adapter.",
+            RootCause: "WebSecurityConfigurerAdapter was removed in Spring Security 6.",
+            Edits: [ValidEdit()],
+            Options: []);
+
+    [Fact]
+    public void Instructions_KeepTheGuardrailRules()
+    {
+        Assert.Contains("Never remove annotations that carry behaviour", PortAgent.Instructions);
+        Assert.Contains("Change only the files the task lists", PortAgent.Instructions);
     }
 
     private sealed class FakeModel(

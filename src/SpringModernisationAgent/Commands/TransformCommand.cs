@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Porting;
 using SpringModernisationAgent.Behaviour;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -368,11 +369,22 @@ public sealed class TransformCommand
                 gitProcessRunner,
                 artifactsDirectory);
 
-        var remediationLoop =
-            CreateRemediationLoop(
+        var knowledge =
+            ProblemKnowledge.LoadDefault(
+                UnsupportedLibraries.All.Select(library => library.Name).ToList());
+
+        var behaviourContract =
+            CreateBehaviourContract(
+                mavenProcessRunner,
+                progress);
+
+        var ports =
+            CreatePortRunner(
                 patchRecorder,
                 transformationValidator,
                 mavenProcessRunner,
+                knowledge,
+                behaviourContract,
                 progress);
 
         var recipeDiscovery =
@@ -389,14 +401,11 @@ public sealed class TransformCommand
                 openRewriteRunner,
                 transformationValidator,
                 patchRecorder,
-                remediationLoop,
+                ports,
                 progress,
                 recipeDiscovery,
-                ProblemKnowledge.LoadDefault(
-                    UnsupportedLibraries.All.Select(library => library.Name).ToList()),
-                CreateBehaviourContract(
-                    mavenProcessRunner,
-                    progress));
+                knowledge,
+                behaviourContract);
 
         return new MigrationWaveExecutor(
             wavePlanner,
@@ -484,13 +493,16 @@ public sealed class TransformCommand
     }
 
     /// <summary>
-    /// Remediation changes code, so it runs only when MIGRATION_REMEDIATION
+    /// The AI changes code, so scoped ports run only when MIGRATION_REMEDIATION
     /// is exactly "enabled". Foundry settings are then required up front.
+    /// Bounds are fixed: one attempt and one repair per task.
     /// </summary>
-    private static IRemediationLoop? CreateRemediationLoop(
-        IWorkspacePatchRecorder patchRecorder,
+    private static IPortRunner? CreatePortRunner(
+        GitWorkspacePatchRecorder patchRecorder,
         TransformationValidator transformationValidator,
         IMavenProcessRunner mavenProcessRunner,
+        ProblemKnowledge knowledge,
+        IBehaviourContractRecorder? behaviourContract,
         IMigrationProgress progress)
     {
         var setting =
@@ -500,26 +512,22 @@ public sealed class TransformCommand
         if (!string.Equals(setting, "enabled", StringComparison.Ordinal))
         {
             Console.WriteLine(
-                "Remediation Agent: not enabled for this run.");
+                "Scoped AI ports: not enabled for this run.");
 
             return null;
         }
 
-        var maxAttempts =
-            RemediationSettings.ParseMaxAttempts(
-                Environment.GetEnvironmentVariable(
-                    "MIGRATION_REMEDIATION_MAX_ATTEMPTS"));
-
         Console.WriteLine(
-            "Remediation Agent: enabled " +
-            $"(at most {maxAttempts} attempts per repository).");
+            "Scoped AI ports: enabled (one attempt and one repair per known API move).");
 
-        return new RemediationLoop(
-            RemediationAgentFactory.Create(),
+        return new PortRunner(
+            PortAgentFactory.Create(),
             new RemediationPatchApplier(),
             patchRecorder,
+            patchRecorder,
             transformationValidator,
-            maxAttempts,
+            knowledge,
+            behaviourContract,
             progress,
             new MavenClassInspectorFactory(
                 mavenProcessRunner,

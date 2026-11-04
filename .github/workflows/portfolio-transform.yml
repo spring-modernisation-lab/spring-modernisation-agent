@@ -5,15 +5,11 @@ on:
     inputs:
       remediation:
         description: >-
-          Run the Remediation Agent on validation failures (Azure AI Foundry;
-          Maven still decides success)
+          Run scoped AI ports for known API moves (Azure AI Foundry; one
+          attempt and one repair per task; Maven and the behaviour contract
+          decide what is kept)
         type: boolean
         default: false
-      remediation-max-attempts:
-        description: Maximum Remediation Agent attempts per repository
-        type: choice
-        options: ["1", "2", "3", "4", "5"]
-        default: "3"
       open-draft-pull-requests:
         description: >-
           Open or update draft pull requests on migration branches for
@@ -248,7 +244,6 @@ jobs:
           MIGRATION_WORKSPACE_ROOT: ${{ runner.temp }}/spring-modernisation-workspaces
           # Remediation changes code, so it is off unless explicitly chosen.
           MIGRATION_REMEDIATION: ${{ (inputs.remediation && steps.azure_login.outcome == 'success') && 'enabled' || 'disabled' }}
-          MIGRATION_REMEDIATION_MAX_ATTEMPTS: ${{ inputs.remediation-max-attempts }}
           MIGRATION_RECIPE_DISCOVERY: ${{ inputs.recipe-discovery && 'enabled' || 'disabled' }}
           MIGRATION_BEHAVIOUR_CONTRACT: ${{ inputs.behaviour-contract && 'enabled' || 'disabled' }}
           MIGRATION_BASELINE_JAVA_HOME: ${{ steps.java11.outputs.path }}

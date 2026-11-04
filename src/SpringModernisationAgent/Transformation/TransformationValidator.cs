@@ -3,7 +3,16 @@ using SpringModernisationAgent.Models;
 
 namespace SpringModernisationAgent.Transformation;
 
-public sealed class TransformationValidator
+/// <summary>Runs a plan's fixed Maven validation checks.</summary>
+public interface ITransformationValidator
+{
+    Task<TransformationValidationResult> ValidateAsync(
+        TransformationPlan transformationPlan,
+        string repositoryPath,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class TransformationValidator : ITransformationValidator
 {
     private readonly IMavenProcessRunner _mavenProcessRunner;
     private readonly IMigrationProgress _progress;

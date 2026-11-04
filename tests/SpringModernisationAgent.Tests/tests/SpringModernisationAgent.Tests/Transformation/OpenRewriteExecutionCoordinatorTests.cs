@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Porting;
 using SpringModernisationAgent.Triage;
 using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Build;
@@ -684,10 +685,45 @@ public class OpenRewriteExecutionCoordinatorTests
             return Task.FromResult<BehaviourReport?>(new BehaviourReport(Record, null, null, null));
         }
 
+        public int Comparisons { get; private set; }
+
         public Task<BehaviourReport> CompareAsync(TransformationPlan plan, string repositoryPath, BehaviourReport baseline, TransformationValidationResult validation, CancellationToken cancellationToken = default)
         {
+            Comparisons++;
             OpenRewriteHadRunAtComparison = runner.Called;
             return Task.FromResult(Compared);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ThePortsContractGateComparison_IsReusedNotRepeated()
+    {
+        // A probe run takes minutes: when nothing changed after the gate, its comparison stands.
+        var runner = new FakeOpenRewriteRunner();
+        var contract = new FakeContract(runner);
+        var gate = FakeContract.Compared with { Note = "from the contract gate" };
+        var ports = new FakePortRunner(RemediationOutcome.Fixed, passed: true) { Behaviour = gate };
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var result = await CreateCoordinator(
+                    new FakeWorkspaceProvider { Workspace = new RepositoryWorkspace("customer-service", workspacePath, CommitSha) },
+                    new FakeRepositoryWorkspaceCleaner(),
+                    runner,
+                    mavenProcessRunner: new FakeMavenProcessRunner([new MavenProcessResult(1, "[ERROR] cannot find symbol", string.Empty)]),
+                    patchRecorder: new FakePatchRecorder(),
+                    ports: ports,
+                    behaviour: contract)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            Assert.Same(gate, result.Behaviour);
+            Assert.Equal(0, contract.Comparisons);
+            Assert.NotNull(ports.Baseline?.Baseline);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
         }
     }
 
@@ -810,7 +846,7 @@ public class OpenRewriteExecutionCoordinatorTests
             new MavenProcessResult(1, "[ERROR] cannot find symbol", string.Empty)
         ]);
 
-        var loop = new FakeRemediationLoop(RemediationOutcome.Fixed, passed: true);
+        var loop = new FakePortRunner(RemediationOutcome.Fixed, passed: true);
         var workspacePath = CreateTemporaryDirectory();
 
         try
@@ -820,7 +856,7 @@ public class OpenRewriteExecutionCoordinatorTests
                 new FakeRepositoryWorkspaceCleaner(),
                 mavenProcessRunner: mavenRunner,
                 patchRecorder: new FakePatchRecorder(),
-                remediationLoop: loop);
+                ports: loop);
 
             var result = await coordinator.ExecuteAsync(
                 "spring-modernisation-lab",
@@ -831,7 +867,7 @@ public class OpenRewriteExecutionCoordinatorTests
             Assert.Equal(RemediationOutcome.Fixed, result.Remediation!.Outcome);
 
             Assert.Equal(
-                ["01-openrewrite", "02-remediation-attempt-1", "cumulative"],
+                ["01-openrewrite", "02-port-m-security-6-filterchain", "cumulative"],
                 result.Patches.Select(patch => patch.Stage));
 
             Assert.Equal("tree", loop.OpenRewriteTreeId);
@@ -847,7 +883,7 @@ public class OpenRewriteExecutionCoordinatorTests
     [Fact]
     public async Task ExecuteAsync_RemediationEnabledButValidationPasses_ReportsNotNeededWithoutCallingTheLoop()
     {
-        var loop = new FakeRemediationLoop(RemediationOutcome.Fixed, passed: true);
+        var loop = new FakePortRunner(RemediationOutcome.Fixed, passed: true);
         var workspacePath = CreateTemporaryDirectory();
 
         try
@@ -856,7 +892,7 @@ public class OpenRewriteExecutionCoordinatorTests
                     CreateWorkspaceProvider(workspacePath),
                     new FakeRepositoryWorkspaceCleaner(),
                     patchRecorder: new FakePatchRecorder(),
-                    remediationLoop: loop)
+                    ports: loop)
                 .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
 
             Assert.True(result.Succeeded);
@@ -877,7 +913,7 @@ public class OpenRewriteExecutionCoordinatorTests
             new MavenProcessResult(1, "[ERROR] cannot find symbol", string.Empty)
         ]);
 
-        var loop = new FakeRemediationLoop(RemediationOutcome.Fixed, passed: true);
+        var loop = new FakePortRunner(RemediationOutcome.Fixed, passed: true);
         var workspacePath = CreateTemporaryDirectory();
 
         try
@@ -890,7 +926,7 @@ public class OpenRewriteExecutionCoordinatorTests
                     {
                         Exception = new InvalidOperationException("Git could not snapshot.")
                     },
-                    remediationLoop: loop)
+                    ports: loop)
                 .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
 
             // Unattributable edits are never made.
@@ -910,7 +946,7 @@ public class OpenRewriteExecutionCoordinatorTests
         IOpenRewriteRunner? openRewriteRunner = null,
         IMavenProcessRunner? mavenProcessRunner = null,
         IWorkspacePatchRecorder? patchRecorder = null,
-        IRemediationLoop? remediationLoop = null,
+        IPortRunner? ports = null,
         IRecipeDiscovery? recipeDiscovery = null,
         ProblemKnowledge? problemKnowledge = null,
         SpringModernisationAgent.Behaviour.IBehaviourContractRecorder? behaviour = null)
@@ -935,7 +971,7 @@ public class OpenRewriteExecutionCoordinatorTests
             openRewriteRunner ?? new FakeOpenRewriteRunner(),
             transformationValidator,
             patchRecorder ?? new FakePatchRecorder(),
-            remediationLoop,
+            ports,
             recipeDiscovery: recipeDiscovery,
             problemKnowledge: problemKnowledge,
             behaviour: behaviour);
@@ -1167,10 +1203,10 @@ public class OpenRewriteExecutionCoordinatorTests
         }
     }
 
-    private sealed class FakeRemediationLoop(
+    private sealed class FakePortRunner(
         RemediationOutcome outcome,
         bool passed)
-        : IRemediationLoop
+        : IPortRunner
     {
         public bool Called { get; private set; }
 
@@ -1180,30 +1216,33 @@ public class OpenRewriteExecutionCoordinatorTests
 
         public TransformationValidationResult? Validation { get; private set; }
 
-        public Task<RemediationLoopResult> RunAsync(
-            TransformationPlan plan,
-            RepositoryWorkspace workspace,
-            string openRewriteTreeId,
-            string openRewritePatchPath,
-            TransformationValidationResult validation,
+        public BehaviourReport? Baseline { get; private set; }
+
+        public BehaviourReport? Behaviour { get; init; }
+
+        public Task<PortRunResult> RunAsync(
+            PortRunInput input,
             CancellationToken cancellationToken = default)
         {
             Called = true;
-            OpenRewriteTreeId = openRewriteTreeId;
-            OpenRewritePatchPath = openRewritePatchPath;
-            Validation = validation;
+            OpenRewriteTreeId = input.OpenRewriteTreeId;
+            OpenRewritePatchPath = input.OpenRewritePatchPath;
+            Validation = input.Validation;
+            Baseline = input.Baseline;
 
-            var final = validation with
+            var final = input.Validation with
             {
                 Status = passed
                     ? TransformationValidationStatus.Passed
                     : TransformationValidationStatus.Failed
             };
 
-            return Task.FromResult(new RemediationLoopResult(
+            return Task.FromResult(new PortRunResult(
                 new RemediationReport(outcome, []),
                 final,
-                [new PatchArtifact("02-remediation-attempt-1", "patches/customer-service/02.patch", "hash", ["A.java"])]));
+                [new PatchArtifact("02-port-m-security-6-filterchain", "patches/customer-service/02.patch", "hash", ["A.java"])],
+                Behaviour,
+                []));
         }
     }
 

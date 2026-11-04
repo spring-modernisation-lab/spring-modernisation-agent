@@ -35,7 +35,59 @@ public enum RemediationOutcome
 /// </summary>
 public sealed record RemediationReport(
     RemediationOutcome Outcome,
-    IReadOnlyList<RemediationAttemptRecord> Attempts);
+    IReadOnlyList<RemediationAttemptRecord> Attempts)
+{
+    /// <summary>The scoped port tasks, in the order they were worked (docs/system-design.md §4.1).</summary>
+    public IReadOnlyList<PortTaskRecord> Tasks { get; init; } = [];
+
+    /// <summary>Problems no task worked, with why: they go to a person.</summary>
+    public IReadOnlyList<string> LeftForAPerson { get; init; } = [];
+}
+
+/// <summary>How a scoped port ended.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PortTaskStatus>))]
+public enum PortTaskStatus
+{
+    /// <summary>Its errors are gone, nothing new fails, and its obligations hold (or could not be checked).</summary>
+    Accepted,
+
+    /// <summary>Not kept after one attempt and one repair: its files are as the recipes left them.</summary>
+    Reverted,
+
+    /// <summary>The AI said it cannot port it within the rules.</summary>
+    CannotFix,
+
+    /// <summary>The model or the pipeline failed; the run stopped.</summary>
+    Error
+}
+
+/// <summary>One scoped port and what became of it.</summary>
+/// <param name=Mapping>The API mapping (<c>M-…</c>), which is also the task's ID.</param>
+/// <param name=Files>The only files the AI could change.</param>
+/// <param name=Problems>The classified problems it covered (<c>P…</c>).</param>
+/// <param name=Reason>Why it was not accepted, when it was not.</param>
+/// <param name=Attempts>Its attempt numbers in <see cref="RemediationReport.Attempts"/>.</param>
+public sealed record PortTaskRecord(
+    string Mapping,
+    string Name,
+    IReadOnlyList<string> Files,
+    IReadOnlyList<string> Problems,
+    PortTaskStatus Status,
+    string? Reason,
+    IReadOnlyList<int> Attempts)
+{
+    /// <summary>Obligation items unchanged from the baseline.</summary>
+    public IReadOnlyList<string> ObligationsKept { get; init; } = [];
+
+    /// <summary>Obligation items that changed, unexplained, as <c>item: before → after</c>.</summary>
+    public IReadOnlyList<string> ObligationsBroken { get; init; } = [];
+
+    /// <summary>Obligation items that changed because of the platform: decisions, not the port's.</summary>
+    public IReadOnlyList<string> ObligationsExplained { get; init; } = [];
+
+    /// <summary>Obligation items that could not be read, or why none could be checked.</summary>
+    public IReadOnlyList<string> ObligationsUnchecked { get; init; } = [];
+}
 
 /// <summary>One attempt, with everything needed to audit it.</summary>
 /// <param name="Number">1-based attempt number.</param>
@@ -62,4 +114,10 @@ public sealed record RemediationAttemptRecord(
 {
     /// <summary>What each applied edit did, in proposal order; empty if not applied.</summary>
     public IReadOnlyList<AppliedEdit> AppliedEdits { get; init; } = [];
+
+    /// <summary>The port task (its mapping) this attempt worked on, if any.</summary>
+    public string? Task { get; init; }
+
+    /// <summary>Why the attempt was not kept (it was reverted), if it was applied and not kept.</summary>
+    public string? NotKept { get; init; }
 }

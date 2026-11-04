@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Porting;
 using SpringModernisationAgent.Behaviour;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Recipes;
@@ -15,7 +16,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly IOpenRewriteRunner _openRewriteRunner;
     private readonly TransformationValidator _transformationValidator;
     private readonly IWorkspacePatchRecorder _patchRecorder;
-    private readonly IRemediationLoop? _remediationLoop;
+    private readonly IPortRunner? _ports;
     private readonly IMigrationProgress _progress;
     private readonly IRecipeDiscovery? _recipeDiscovery;
     private readonly ProblemKnowledge? _problemKnowledge;
@@ -28,7 +29,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     IOpenRewriteRunner openRewriteRunner,
     TransformationValidator transformationValidator,
     IWorkspacePatchRecorder patchRecorder,
-    IRemediationLoop? remediationLoop = null,
+    IPortRunner? ports = null,
     IMigrationProgress? progress = null,
     IRecipeDiscovery? recipeDiscovery = null,
     ProblemKnowledge? problemKnowledge = null,
@@ -48,8 +49,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
         _transformationValidator = transformationValidator;
         _patchRecorder = patchRecorder;
 
-        // Null means remediation is not enabled for this run.
-        _remediationLoop = remediationLoop;
+        // Null means the AI is not enabled for this run.
+        _ports = ports;
         _progress = progress ?? NullMigrationProgress.Instance;
 
         // Null means recipe discovery is off for this run.
@@ -223,7 +224,9 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
             RemediationReport? remediation = null;
 
-            if (_remediationLoop is not null)
+            BehaviourReport? portsBehaviour = null;
+
+            if (_ports is not null)
             {
                 if (validationResult.Passed)
                 {
@@ -237,18 +240,24 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 }
                 else
                 {
-                    var loop = await _remediationLoop.RunAsync(
-                        transformationPlan,
-                        workspace,
-                        openRewrite.TreeId,
-                        openRewrite.FullPath,
-                        validationResult,
+                    // Scoped ports: one known API move at a time (docs/system-design.md §4.1).
+                    var ported = await _ports.RunAsync(
+                        new PortRunInput(
+                            transformationPlan,
+                            workspace,
+                            openRewrite.TreeId,
+                            openRewrite.FullPath,
+                            validationResult,
+                            problems,
+                            unsupportedLibraries,
+                            behaviourBaseline),
                         cancellationToken);
 
                     // Maven's last result is the authoritative outcome.
-                    validationResult = loop.FinalValidation;
-                    patches.AddRange(loop.AttemptPatches);
-                    remediation = loop.Report;
+                    validationResult = ported.FinalValidation;
+                    patches.AddRange(ported.AttemptPatches);
+                    remediation = ported.Report;
+                    portsBehaviour = ported.Behaviour;
                 }
             }
 
@@ -271,9 +280,10 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
             // After the cumulative patch, so the probe (which it writes and
             // deletes) can never reach a patch.
+            // The contract gate's comparison stands when nothing changed after it.
             var behaviour = behaviourBaseline is null
                 ? null
-                : await _behaviour!.CompareAsync(
+                : portsBehaviour ?? await _behaviour!.CompareAsync(
                     transformationPlan,
                     workspace.RepositoryPath,
                     behaviourBaseline,
