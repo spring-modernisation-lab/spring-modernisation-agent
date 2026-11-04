@@ -289,10 +289,24 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
   - One structured call per repository, given the errors and the index shortlist.
   - Names not in the index are dropped.
   - Verify with a fake model (an invented name is dropped), then once against the real model.
-- [ ] **Measure.**
-  - In the transform job, for at most 3 candidates per repository: `dryRun` on a throwaway copy, then compile.
-  - The result is "errors 12 → n, new 0", or `unverified` (for example, the module needs a newer core).
-  - Verify in the probe workflow first.
+- [x] **Probe can measure candidates** (`fa7bae0`): an optional `candidate-recipes` input. Candidates run after the route's recipes on the probe's throwaway clone, and their changes go to `candidates.patch`. A candidate that fails to run is recorded, not fatal. The summary shows the compile-error count.
+- [x] **First measurement, probe #6: `MigrateUserType` is rejected.** It removes 1 T1 error and adds 3.
+  - Removed: the `CustomerOrder` `UserType<?>` mismatch (it added the type parameter).
+  - Added in `MoneyUserType`: `BigDecimal` not found ×2 (a missing import) and `variable resultSet` not found (a renamed parameter whose use wasn't updated). The `nullSafeGet` error became `getSqlType()`.
+  - T1: 4 → 5 errors; total 12 → 13. T2 and T4 unchanged; only `MoneyUserType.java` touched.
+  - **T1 stays an AI port.** The best possible index match still needed measuring.
+  - From `candidates.patch`: the recipe correctly made the class `UserType<Money>`, typed every signature with `Money`, and moved `nullSafeGet` to `(ResultSet, int, …)`. It has four bugs:
+    1. `nullSafeGet` returns `BigDecimal`, which the class never uses, and it isn't imported;
+    2. it renamed `resultSet` to `rs` without updating the body;
+    3. `assemble` casts `(BigDecimal) cached`, which would be a runtime `ClassCastException` if someone just added the import;
+    4. `sqlTypes()` is not migrated to `getSqlType()`.
+
+    Bugs 1 and 3 suggest the recipe assumes a `BigDecimal` type instead of reading the class.
+- [ ] **Measure, in the pipeline.**
+  - For at most 3 candidates per repository: run on a throwaway copy, then compile.
+  - **Compare error sets, not counts**, keyed by file and message: R6's 12 → 13 hides 1 fixed and 3 new.
+  - A candidate is suitable only if it removes at least one error and adds none. Otherwise report what it removed and added, so nobody re-tries it by hand.
+  - `unverified` if it can't run (for example, it needs a newer core).
 - [ ] **Report.** A "Recipe candidates" section in the results document and a PR section, "Possible recipes for the remaining errors (suggestions, not applied)". Suggestions are counted in the ledger later (8.10).
 - Never: the pipeline applies a suggested recipe, or changes a route, by itself.
 
