@@ -321,7 +321,10 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 
   Suggestions are counted in the ledger later (8.10).
 - Tests: 9 discovery tests (each verdict, the workspace untouched and the copy removed, an index that can't load), 3 comparison tests, 4 rendering tests and 2 coordinator wiring tests. 606 pass.
-- [ ] Confirm in CI: one transform run with recipe discovery on and remediation **off** (no AI tokens). It should show `MigrateUserType` as ❌ unsuitable for orders-service in the job summary and the PR.
+- [x] Confirmed in CI, run #25 (`b29bf8f`): recipe discovery on, remediation off, no AI tokens, 6m 46s.
+  - The job summary shows `MigrateUserType` ❌ unsuitable ("removes 3 errors, adds 4"), plus `UpgradeApacheHttpClient_5_DeprecatedMethods`, `…_ClassMapping` and `WebSecurityConfigurerAdapter` as already ran.
+  - The orders-service draft PR #1 gained "Possible recipes for the remaining errors (suggestions, not applied)", listing the errors the recipe would add.
+  - Outcomes: orders-service Needs decision, platform-parent Succeeded.
 - Never: the pipeline applies a suggested recipe, or changes a route, by itself.
 
 ### 8.2 Behaviour contract v1 (design §3)
@@ -403,6 +406,33 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 - [ ] The ledger reports outcome variance, cost, and **the AI's share of the work per kind**, the measure of progress. The run tables in `tasks/demo-traps.md` are generated from it.
 - Verify: R13–R24 back-filled; the generated tables match the hand-written facts.
 
+### 8.11 T-shirt sizing (design §16)
+
+- [ ] **Estimate, at assessment.** A source scan for hotspots: removed or changed APIs (`WebSecurityConfigurerAdapter`, `UserType` implementations, HttpClient 4, `javax.*` names in strings), unsupported libraries, version distance, blast radius (internal dependents), source size and whether tests exist.
+  - The rubric lives in `Config/knowledge/sizing.yaml`, as points per signal mapped to XS–XL, and is validated on load.
+  - The size is shown per repository and per wave in the strategy document. The AI may explain a size, never set one.
+  - This half can be built now; it doesn't depend on 8.3.
+- [ ] **Actual, after the transform** (needs 8.3's problem kinds). The size is set by the work left for people:
+  - XS: recipes only;
+  - S: one port;
+  - M: several ports;
+  - L: ports plus a decision;
+  - XL: several decisions, or a decision with a wide blast radius.
+
+  It appears in the results document, the job summary and each PR.
+- [ ] Both sizes go in the ledger (8.10) next to tokens, decisions and time to close. When they disagree, the rubric is changed in a reviewed commit.
+- Verify: `orders-service` is estimated L and actually L; `platform-parent` is XS both times. A test proves a rubric change made only in YAML changes a size.
+
+### 8.12 Running it in reality: releases, refreshes and cut-over (design §17)
+
+- [ ] **Release-aware wave gate.** The next wave is eligible only when the previous wave's PRs are merged and the new parent or library versions are **published** (checked in the Maven repository). Today the gate only needs "Succeeded".
+- [ ] **Version bump step.** Each consumer's route gets a deterministic first step that moves its parent or library to the released version (OpenRewrite's parent-version recipes), taking the version from the release record.
+- [ ] **Refresh mode.** Re-run a repository's migration when `main` changes (or nightly): regenerate the branch from the new commit with recipes, recorded decisions and ports; update the PR; report drift ("3 files changed on `main` since the last refresh; 1 needs porting").
+- [ ] **Cut-over checklist in every PR:** create `release/1.x` (for parents and libraries) or `release/2.7` (for services) before merging, release as a new major version, retire the old line on a set date.
+- [ ] **Re-assess after each wave.**
+- Out of scope for the pipeline: merging, releasing and retiring versions. People own them; the pipeline says when each is possible.
+- Verify: with `platform-parent` 2.0.0 published to a test repository, wave 2 becomes eligible and its consumers' parent version is bumped deterministically. A commit to `orders-service` `main` produces a refreshed PR with a drift line.
+
 ## Phase 6: Document polish (small)
 
 - [x] "AI contribution and control boundaries" table in the migration results document.
@@ -423,7 +453,7 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 
 Done: Phase 3 → 4.1–4.6 → CI runs → Phase 5.
 
-Next: **8.0 → 8.1 (done) → 8.1b → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, then 6 → 7. Each step is test-first and committed separately.
+Next: **8.0 → 8.1 (done) → 8.1b (done) → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, 8.11 (sizing: the estimate half can start any time) and 8.12 (releases, refreshes, cut-over), then 6 → 7. Each step is test-first and committed separately.
 
 8.3 comes before 8.2 because classification needs no JDK and can be verified on recorded runs straight away. The contract needs a probe workflow.
 

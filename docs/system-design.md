@@ -370,7 +370,83 @@ Guidelines:
 | R24 | Decision correct; the carried servlet fix still failed; TTL dropped again | §4.1: rejected for not removing its evidence, then reverted; §5: T3 becomes a recipe; §3: `B-BEAN-…TimeToLive` |
 | All | One open loop chasing green; knowledge re-derived each run | §2–§5 |
 
-## 16. Non-goals
+## 16. Sizing the migration effort (T-shirt sizes)
+
+Each repository is sized twice: an **estimate** at assessment, before anything changes, and an **actual** after the transform, from what is left for people. The size is always computed from facts by a rubric in configuration (`Config/knowledge/sizing.yaml`). The AI may explain a size, but never sets one.
+
+### 16.1 Estimate, at assessment
+
+The assessment already records each repository's kind, Spring and Java versions, Maven project, external dependencies, internal dependents and baseline build. A cheap source scan adds **hotspots**, each a fact from the code:
+
+| Signal | Example | Why it costs effort |
+|---|---|---|
+| APIs the platform removed or changed | `WebSecurityConfigurerAdapter`, Hibernate `UserType` implementations, HttpClient 4, `javax.*` names in strings | Known ports; some are recipes, some aren't |
+| Unsupported libraries | Ehcache 2, Springfox, the Keycloak adapter (catalogue, and the BOM comparison) | Each one is a decision for a person |
+| Version distance | Boot 2.7 → 3.5, Java 11 → 21 | More recipes, more behaviour change |
+| Blast radius | Repositories that depend on this one | A parent or library gates a whole wave |
+| Size and safety net | Source files; whether tests exist | Less test coverage means more review |
+
+The rubric gives each signal points, and the total maps to a size. Totals are shown per wave, which helps plan how long the old and new lines must coexist (§17).
+
+### 16.2 Actual, after the transform
+
+This sizes the **work remaining for people**, using the problem kinds (§4). It's defined by the kind of work left, not by hours or error counts: a recipe can remove 12 errors at once, but a decision costs what it costs.
+
+| Size | Work left |
+|---|---|
+| **XS** | None: recipes only |
+| **S** | One small API port |
+| **M** | Several API ports |
+| **L** | API ports plus one decision (a dropped library, or a contract question) |
+| **XL** | Several decisions, or a decision on a repository with a wide blast radius |
+
+On the demo estate:
+- `orders-service` is estimated **L** (four API hotspots plus Ehcache 2). Its actual is **L**: three ports (T1, T2, T4), one platform decision (T6) and one contract question (T5).
+- `platform-parent` is **XS** both times.
+
+### 16.3 Where sizes appear, and how they improve
+
+- **The estimate** appears in the strategy document, per repository and per wave.
+- **The actual** appears in the results document, the job summary and each draft PR.
+- **Both** go in the ledger (§10.4), next to what actually happened: AI tokens spent, decisions taken, time until the PR closed.
+
+With five repositories, the rubric starts as a reasoned heuristic. The ledger is how it gets calibrated: when estimates and actuals disagree, the rubric's points change, in a reviewed commit, like any other knowledge.
+
+## 17. Running the migration alongside ongoing work
+
+The pipeline stops at a draft PR and never merges. That's right for a single repository, but an estate needs more. A parent or shared library has to be **released** before its consumers can move, and services keep shipping on Boot 2.7 while their migration waits. This section describes how the waves work in practice. It belongs to people and process; the pipeline's job is to make each step cheap and visible.
+
+### 17.1 Parents and libraries: two lines for a while
+
+- A migrated parent or library is released as a **new major version**, alongside the old one. For example, `platform-parent` 2.0.0 is Boot 3.5 / Java 21, while **1.x (Boot 2.7) carries on** from a maintenance branch (`release/1.x`) for consumers that haven't moved.
+- One parent can't serve both Boot 2.7 and Boot 3, so the two lines are unavoidable. The major version tells consumers it's a breaking change.
+- 1.x is retired on a set date, once every consumer has moved. The T-shirt sizes per wave (§16) tell you roughly how long that will be.
+
+### 17.2 Waves gate on releases, not just on success
+
+- Today the wave gate opens when the previous wave **Succeeded**. In practice the next wave can only build once the new parent or library version **exists in the Maven repository**.
+- The gate becomes **release-aware**: the previous wave's PRs are merged, and the new versions are published.
+- Each consumer's route then gets a deterministic first step that moves its parent or library dependency to the released version. OpenRewrite has recipes for changing a parent version, so that step needs no AI.
+- The estate is **re-assessed after each wave**, which catches repositories that changed in the meantime.
+
+### 17.3 Services keep shipping: migration branches are regenerated, not maintained
+
+- Feature and support work carries on in `main`, on Boot 2.7, as normal. Nobody works in the migration branch.
+- The migration branch is **regenerated**, not rebased. On each new commit to `main` (or nightly), the pipeline re-runs from that commit and force-pushes the branch: recipes, then recorded decisions (§12), then ports. It already rebuilds the branch from scratch on every run.
+- This is why durable fixes matter. Recipes and decision records reapply deterministically on every refresh. Only genuinely new code needs porting, and it shows up as a fresh failure on the next refresh, not as a merge conflict months later.
+- A refresh reports **drift**, for example "3 files changed on `main` since the last refresh; 1 needs porting".
+
+### 17.4 Cut-over, one service at a time
+
+1. The PR is green, reviewed, and its decisions are made.
+2. Refresh it on the latest `main`.
+3. If the current release is still in production, create a `release/2.7` branch for critical fixes only.
+4. Merge, and release as a new major version.
+5. Fixes made on `release/2.7` until the new version is deployed are forward-ported to `main` (or simply picked up by the next refresh), and the branch is retired.
+
+**The guiding principle:** people own merging, releasing and retiring versions. The pipeline keeps every migration branch current, says when the next step is possible, and puts the cut-over checklist in each PR. That keeps the "never merges by itself" rule, while making a long migration workable alongside ongoing support.
+
+## 18. Non-goals
 
 - **Autonomy beyond proposals.** The AI never applies, merges, pushes or decides success, never picks a problem's kind (outside `K-UNKNOWN` suggestions), and never edits tests, POMs or CI.
 - **Agent-written policy.** An agent may *propose* a recipe, mapping, probe or rule. It becomes policy only with a fixture, a replay diff and human review in a commit.
