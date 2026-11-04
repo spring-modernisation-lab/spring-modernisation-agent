@@ -80,7 +80,8 @@ public class PullRequestContentBuilderTests
         Assert.Contains("**Recommended:** Ehcache 3 through JCache", body);
         Assert.Contains("1. `pom.xml`: replace `net.sf.ehcache:ehcache` with `org.ehcache:ehcache`", body);
         Assert.Contains("- Caffeine:", body);
-        Assert.DoesNotContain("Not a known library", body);
+        // The verdict names it; the manual steps never invent guidance for it.
+        Assert.DoesNotContain("### Not a known library", body);
     }
 
     [Fact]

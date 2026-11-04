@@ -257,6 +257,8 @@ verdict(result) -> { state: Succeeded | NeedsDecision | Failed | NotRun,
 
 The reasons are printed everywhere: the job summary, the PR, the results document and the digest.
 
+**As built (8.5):** `Verdict.Of` in `Models/Verdict.cs`. A reason that needs a person makes it `NeedsDecision`; otherwise a failing build makes it `Failed`. A contract that could not be compared because the build failed is a consequence of the failure, not a decision. Results recorded before scoped ports keep the old agent's own decision as `AI-DECISION`, so earlier runs replay to the states they had.
+
 **Invariants over shapes.** The earlier lesson still holds: when a guardrail has been bypassed twice, look for the invariant. `I-UNSUPPORTED-NEVER-SUCCEEDS` ended the Ehcache series. The contract generalises that lesson. `I-CONTRACT-MATCHES` is the invariant that covers behaviour in general.
 
 ## 9. Policy and knowledge as data

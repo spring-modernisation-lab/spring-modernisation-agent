@@ -247,6 +247,10 @@ public static class PullRequestContentBuilder
 
         body.AppendLine("## Outcome");
         body.AppendLine();
+        body.AppendLine($"**{VerdictText.State(result.Verdict.State)}**, decided by the pipeline from facts:");
+        body.AppendLine();
+        body.Append(result.Verdict.Reasons.Count == 0 ? "- Maven passed, the behaviour matches, and nothing is left for a person.\n" : VerdictText.Reasons(result.Verdict));
+        body.AppendLine();
         body.AppendLine(
             $"- Maven validation: **{result.Validation.Status}**" +
             (failed is null ? string.Empty : $" ({failed.Check})"));

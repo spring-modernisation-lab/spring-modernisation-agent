@@ -5,36 +5,17 @@ public sealed record TransformationExecutionResult(
     TransformationValidationResult Validation)
 {
     /// <summary>
-    /// Migrated and validated, with nothing left for a person to decide. A
-    /// repository that still uses an unsupported library never succeeds,
-    /// even when Maven passes: the AI cannot edit <c>pom.xml</c>, so a green
-    /// build means the library was worked around, not replaced (run 23).
+    /// The repository's state and every reason for it, from one function
+    /// over the facts (docs/system-design.md §8.2). Everything that shows or
+    /// gates on an outcome reads this.
     /// </summary>
-    public bool Succeeded =>
-        Transformation.Status == TransformationStatus.Succeeded
-        && Validation.Status == TransformationValidationStatus.Passed
-        && UnsupportedLibraries.Count == 0
-        && BehaviourHoldsOrWasNotRecorded;
+    public Verdict Verdict => Verdict.Of(this);
 
-    /// <summary>
-    /// A person must choose before this can proceed: the Remediation Agent
-    /// asked for a decision, or the repository still uses a library the
-    /// target platform dropped.
-    /// </summary>
-    public bool NeedsDecision =>
-        Transformation.Status == TransformationStatus.Succeeded
-        && (Remediation?.Outcome == RemediationOutcome.NeedsHumanDecision
-            || UnsupportedLibraries.Count > 0
-            || (Validation.Status == TransformationValidationStatus.Passed && !BehaviourHoldsOrWasNotRecorded));
+    /// <summary>Migrated, validated, behaving as before, and nothing left for a person.</summary>
+    public bool Succeeded => Verdict.State == VerdictState.Succeeded;
 
-    /// <summary>
-    /// Invariant I-CONTRACT-MATCHES: when a baseline was recorded, success
-    /// also needs the migrated application to behave the same (or every
-    /// difference to be allowed by a decision). A baseline whose comparison
-    /// could not be made does not count as holding.
-    /// </summary>
-    private bool BehaviourHoldsOrWasNotRecorded =>
-        Behaviour?.Baseline is null || Behaviour.Holds;
+    /// <summary>Something only a person can decide remains (see <see cref="Verdict"/> for what).</summary>
+    public bool NeedsDecision => Verdict.State == VerdictState.NeedsDecision;
 
     /// <summary>
     /// Preserved patches, in stage order, plus <c>cumulative</c>. Empty for
@@ -76,6 +57,12 @@ public sealed record TransformationExecutionResult(
     /// Empty when validation passed or classification was off.
     /// </summary>
     public IReadOnlyList<SpringModernisationAgent.Triage.ClassifiedProblem> Problems { get; init; } = [];
+
+    /// <summary>
+    /// The problems still failing at the end, after any ports, classified
+    /// the same way. Empty when validation passed. The verdict reads these.
+    /// </summary>
+    public IReadOnlyList<SpringModernisationAgent.Triage.ClassifiedProblem> RemainingProblems { get; init; } = [];
 
     /// <summary>The behaviour contract; null when it was off or the repository can't be probed.</summary>
     public BehaviourReport? Behaviour { get; init; }

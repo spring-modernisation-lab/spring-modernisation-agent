@@ -223,6 +223,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
             }
 
             RemediationReport? remediation = null;
+            var remaining = problems;
 
             BehaviourReport? portsBehaviour = null;
 
@@ -258,6 +259,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                     patches.AddRange(ported.AttemptPatches);
                     remediation = ported.Report;
                     portsBehaviour = ported.Behaviour;
+                    remaining = ported.Problems;
                 }
             }
 
@@ -311,12 +313,14 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 UnsupportedLibraries = unsupportedLibraries,
                 RecipeDiscovery = recipeDiscovery,
                 Problems = problems,
+                RemainingProblems = validationResult.Passed ? [] : remaining,
                 Behaviour = behaviour
             };
 
             _progress.Report(
                 repository,
-                $"finished: {(result.Succeeded ? "Succeeded" : result.NeedsDecision ? "Needs decision" : "Failed")} " +
+                $"finished: {result.Verdict.State}" +
+                (result.Verdict.Reasons.Count == 0 ? " " : $" ({string.Join(", ", result.Verdict.Reasons.Select(reason => reason.Id).Distinct())}) ") +
                 $"({started.Elapsed.TotalSeconds:F0}s)");
 
             return result;

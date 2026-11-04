@@ -134,9 +134,13 @@ public sealed class MigrationResultsDocumentWriter
 
     private static string Outcome(
         TransformationExecutionResult result) =>
-        result.Succeeded ? "Succeeded"
-        : result.NeedsDecision ? "Needs decision"
-        : "Failed";
+        result.Verdict.State switch
+        {
+            VerdictState.Succeeded => "Succeeded",
+            VerdictState.NeedsDecision => "Needs decision: " + string.Join(", ", result.Verdict.Reasons.Where(reason => reason.NeedsAPerson).Select(reason => reason.Id).Distinct()),
+            VerdictState.NotRun => "Not run",
+            _ => "Failed: " + string.Join(", ", result.Verdict.Reasons.Select(reason => reason.Id).Distinct())
+        };
 
     private static void AddSummary(
         Body body,

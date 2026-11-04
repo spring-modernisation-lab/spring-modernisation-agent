@@ -99,7 +99,7 @@ flowchart TD
 | **Report** (`report`) | Writes the migration results document. | Deterministic, plus labelled AI analysis |
 | **Hand over** (`publish`, opt-in) | Writes a reviewer summary and opens or updates a **draft** pull request on `migration/spring-boot-3.5-java-21`. It never pushes to the default branch and never merges. | A person |
 
-Each repository ends in one of four states: **Succeeded**, **Needs decision**, **Failed** or **Not run**. Only *Succeeded* opens the next wave. A repository that still uses a library Spring Boot 3 dropped (for example Ehcache 2) is *Needs decision*, whatever Maven says.
+Each repository ends in one of four states: **Succeeded**, **Needs decision**, **Failed** or **Not run**, decided by one function from facts and shown with its reasons (for example `I-UNSUPPORTED-NEVER-SUCCEEDS`, `K-CONTRACT`, `F-MAVEN`) in the job summary, the PR and the results document. Only *Succeeded* opens the next wave. A repository that still uses a library Spring Boot 3 dropped (for example Ehcache 2) is *Needs decision*, whatever Maven says.
 
 ## Key findings (CI runs 11–27)
 

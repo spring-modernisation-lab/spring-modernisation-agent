@@ -173,11 +173,13 @@ public sealed class TransformCommand
 
             Console.WriteLine(
                 $"  Overall: " +
-                $"{(result.Succeeded
-                    ? "Succeeded"
-                    : result.NeedsDecision
-                        ? "Needs decision"
-                        : "Failed")}");
+                $"{result.Verdict.State}");
+
+            foreach (var reason in result.Verdict.Reasons)
+            {
+                Console.WriteLine(
+                    $"    {reason.Id}{(reason.NeedsAPerson ? " (a person)" : "")}: {reason.Text}");
+            }
 
             if (result.Transformation.ChangedFiles.Count > 0)
             {

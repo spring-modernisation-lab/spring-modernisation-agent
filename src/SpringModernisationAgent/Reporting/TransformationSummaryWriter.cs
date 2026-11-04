@@ -41,9 +41,15 @@ public static class TransformationSummaryWriter
                     : result.Transformation.Status.ToString(),
                 DescribeValidation(result.Validation),
                 remediation,
-                result.Succeeded ? "✅ Succeeded"
-                    : result.NeedsDecision ? "⚠️ Needs decision"
-                    : "❌ Failed"));
+                VerdictText.State(result.Verdict.State)));
+        }
+
+        foreach (var result in results.Where(result => result.Verdict.Reasons.Count > 0))
+        {
+            markdown.AppendLine();
+            markdown.AppendLine($"### {result.Transformation.RepositoryName}: {VerdictText.Why(result.Verdict.State)}");
+            markdown.AppendLine();
+            markdown.Append(VerdictText.Reasons(result.Verdict));
         }
 
         foreach (var result in results.Where(result => result.Remediation?.Attempts.Count > 0))

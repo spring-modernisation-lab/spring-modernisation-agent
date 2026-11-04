@@ -442,10 +442,13 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
 
 - [ ] For a `K-UNKNOWN` problem the AI proposes a kind and a mapping, with evidence, and makes no edits. A person confirms, and confirmed ones become signatures (design §12, accretion).
 
-### 8.5 One verdict, with reasons (design §8.2) *(no CI)*
+### 8.5 One verdict, with reasons (design §8.2) *(no CI)* (done)
 
-- [ ] `Verdict { State, Reasons[] }` from one function, using the Maven result, contract differences, remaining problem kinds and invariants. Wave gating, the PR, the summary and the results document read only it.
-- [ ] Facts (unsupported libraries, contract, kinds) are computed once per repository and passed down. Today the coordinator and the loop each call `UnsupportedLibraries.FindIn`.
+- [x] `Verdict.Of(result)` → `{ State, Reasons[] }` (`Models/Verdict.cs`), from the Maven result, unsupported libraries, the problems that **remain** after the ports (new `RemainingProblems`), the ports and the behaviour contract. Never from what the AI said about its own work. `Succeeded` and `NeedsDecision` are read from it, so wave gating does too. The job summary ("why it needs a decision"), the PR's Outcome, the results document and the console all show the reasons (`Reporting/VerdictText`).
+  - Reasons: `I-UNSUPPORTED-NEVER-SUCCEEDS`, `I-CONTRACT-MATCHES` (counting known platform changes and unchecked items), `K-PLATFORM-DROPPED`, `K-CONTRACT`, a port not kept (by its `M-…`), `K-API-MOVE`, `K-MECHANICAL` or `K-UNKNOWN` left as work, `F-MAVEN`, `F-OPENREWRITE`, `F-AI`, and `AI-DECISION` for results recorded before scoped ports.
+  - **Needs decision** if any reason needs a person; **Failed** if the build fails and nothing waits on a person; an uncompared contract is a consequence of a failed build, not a decision.
+- [x] Facts are computed once: since 8.4 the coordinator is the only caller of `UnsupportedLibraries.FindIn`, and it passes the result to the port runner.
+- Verified: 15 table-driven tests. A replay over the real results of runs 20–27 gives the recorded states with reasons: R23's false "Fixed" is now `NeedsDecision` (`I-UNSUPPORTED-NEVER-SUCCEEDS`); R22 and R24 are `NeedsDecision` (the library and `AI-DECISION`); R27 is `NeedsDecision` (the library and the contract; its `K-…` reasons need `RemainingProblems`, recorded from the next run).
 - Verify: table-driven tests over state × reason; R22, R23 and R24 produce `NeedsDecision` with the expected reasons.
 
 ### 8.6 Stable identifiers throughout (design §7) *(no CI)*
@@ -538,7 +541,7 @@ Needed before 8.12's release-aware gate and refresh mode can work across runs: t
 
 Done: Phase 3 → 4.1–4.6 → CI runs → Phase 5.
 
-Done: **8.0 → 8.1 → 8.1b → 8.3 → 8.2 → 8.4**. Run 27 tested the redesign as a whole: T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions. Next: **8.5** (one verdict, with reasons), then 8.8 (decision records, so a repository whose decisions are made can succeed with the contract matching). Then 8.6–8.10, 8.11 (sizing: the estimate half can start any time), 8.13 (persisted estate state) and 8.12 (releases, refreshes, cut-over; it needs 8.13), then 6 → 7. Each step is test-first and committed separately.
+Done: **8.0 → 8.1 → 8.1b → 8.3 → 8.2 → 8.4 → 8.5**. Run 27 tested the redesign as a whole: T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions. Next: 8.8 (decision records, so a repository whose decisions are made can succeed with the contract matching). Then 8.6–8.10, 8.11 (sizing: the estimate half can start any time), 8.13 (persisted estate state) and 8.12 (releases, refreshes, cut-over; it needs 8.13), then 6 → 7. Each step is test-first and committed separately.
 
 8.3 comes before 8.2 because classification needs no JDK and can be verified on recorded runs straight away. The contract needs a probe workflow.
 
