@@ -446,6 +446,40 @@ The pipeline stops at a draft PR and never merges. That's right for a single rep
 
 **The guiding principle:** people own merging, releasing and retiring versions. The pipeline keeps every migration branch current, says when the next step is possible, and puts the cut-over checklist in each PR. That keeps the "never merges by itself" rule, while making a long migration workable alongside ongoing support.
 
+### 17.5 Persisted estate state: waves survive between runs
+
+A migration takes months and many runs, so the plan and its progress must outlive any one run. Workflow artifacts can't do this: they expire, you need the previous run's id to fetch them, and they have no history or review. Today each run starts with no previous results, so every run would open wave 1 again.
+
+**Where:** a dedicated **state repository** per estate (for example `migration-state`), separate from the tool's code. One tool serves several estates, each with its own access. Git gives history, diffs, review and an audit trail without running a database.
+
+```
+migration-state/
+  estate/assessment.json              # the assessment the waves came from
+  waves/wave-1.json                   # members, each pinned to its assessed commit; gate status
+  repos/orders-service.json           # latest state: status, verdict reasons, PR, branch, run id
+  decisions/D-orders-service-1.yaml   # decision records (§12)
+  runs/ledger.jsonl                   # one digest per run (§10.4)
+```
+
+**Store only what can't be derived.** Stored status is a cache; facts win. Every run starts by **reconciling** the stored state with the facts:
+- whether each wave's PRs are merged, from GitHub;
+- whether the new parent or library versions are published (the release-aware gate, §17.2), from the Maven repository;
+- whether a repository's default branch has moved past its assessed or refreshed commit. If it has, the repository is due a refresh (§17.3), and a structural change (a new module, a new dependency on another repository) means it is re-assessed.
+
+Decisions, approved plans and the ledger exist nowhere else, so they are stored, never derived.
+
+**The run cycle:**
+1. Check out the state repository and reconcile.
+2. Pick the open wave and the repositories in it that are due.
+3. Run them.
+4. Commit the new results, the repository states and a ledger line in one commit, and push.
+
+Only one transform per estate writes at a time (a workflow concurrency group). A rejected push is retried after a rebase; the files are per repository, so concurrent edits rarely touch the same file.
+
+**Approval is a merge.** A new or changed assessment is proposed as a pull request on the state repository. Merging it is a person approving the waves and their membership. A decision record is added the same way. The pipeline never merges these either.
+
+**Identifiers:** every file is keyed by stable IDs (§7): repository name, wave number, decision `D-…`, run id. A file can be read on its own, and a reviewer can follow a repository's whole history with `git log repos/orders-service.json`.
+
 ## 18. Non-goals
 
 - **Autonomy beyond proposals.** The AI never applies, merges, pushes or decides success, never picks a problem's kind (outside `K-UNKNOWN` suggestions), and never edits tests, POMs or CI.

@@ -395,20 +395,51 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 
 ### 8.4 Scoped ports replace the open loop (design §4.1)
 
-- [ ] `PortTask`: problem, mapping, the files in scope (from the diagnostics), evidence for this problem only, and obligations (contract items). The agent's tools and instructions are scoped to the task; edits outside its files are rejected.
-- [ ] Acceptance:
-  1. the task's evidence is gone;
-  2. nothing new fails;
-  3. its obligations are `same`.
+The AI gets one **task** (a known API move, its files, its evidence, its obligations), never the repository. A port is kept only if it is better and keeps its behaviour; otherwise it is reverted and goes to a person with the attempt attached. The AI still proposes every port's code: that is the demo.
 
-  Otherwise the workspace is restored to the task's base tree (a "restore tree" step in the patch recorder), and the problem goes to a person with the attempt attached. One attempt plus one repair.
-- [ ] Problems are worked in order (mechanical, API moves, then decisions); a problem whose evidence has disappeared is closed.
-- [ ] `K-PLATFORM-DROPPED` and `K-CONTRACT` never create a task. The AI's NeedsHumanDecision choice is replaced by classification; it may only propose a kind for `K-UNKNOWN`.
-- [ ] Remove the repository-wide attempt loop and the `remediation-max-attempts` input (replaced by per-task bounds).
-- Verify:
-  - unit tests for acceptance, revert, ordering and closing;
-  - replaying R24 attempt 2 as a task is rejected (`HttpServletRequest` still missing) and reverted;
-  - a local port trial of `M-HTTPCLIENT-5-POOL` keeps the TTL obligation.
+**Decisions taken in this plan (from runs 14–26):**
+- **One task per mapping, not per file.** The problems that share a mapping (for example `MoneyUserType` and `CustomerOrder` for `M-HIBERNATE-6-USERTYPE`) are one task over all their files. Tasks never share files, so one can be reverted without touching another.
+- **Obligations are machine-readable.** Each mapping gets `obligations:`, contract item patterns (for example `B-BEAN-*-HttpClient.*`). `mustKeep` stays as the reviewer-facing wording. `M-HIBERNATE-6-USERTYPE` has none yet (the probe doesn't read the stored column format), and the plan says so instead of pretending.
+- **Obligations are checked once everything compiles, not after every port.** The probe needs a compiling application, and a half-ported repository doesn't compile. So the order is: port every task to compile, then one **contract gate** (one probe run) checks every accepted task's obligations at once. A task that broke one gets its single repair, then a second probe run. That's at most two probe runs per repository.
+- **Platform-caused differences are not blamed on a port.** Run 26's trailing-slash 404s come from Spring 6, not the security port. Blaming that port would send the AI after something it can't fix inside `SecurityConfiguration`, and then revert a good port. A new knowledge section, `behaviour-signatures`, classifies known platform differences as `K-CONTRACT`, starting with *a trailing-slash path that now returns 404*. Only unexplained differences in a task's obligations count against it.
+- **"Nothing new fails" respects how javac reports.** Fixing one file can reveal errors javac hadn't reported yet in other files. A new problem counts against the task when it is in the task's files, or matches no signature (`K-UNKNOWN`). A newly revealed problem that is a known kind of its own was already there; it becomes its own task or decision. When the failing check moves on (compile passes, tests now fail), that is progress, not a new failure.
+- **A reverted port leaves its files as the recipes left them.** If the HttpClient port can't keep the TTL, the repository goes back to not compiling there, and the PR shows the attempt and why it was reverted. That is honest, but it means a repository with a lost obligation ends as **Needs decision** with no compiling code for that file, not green with a silent loss.
+- **No AI NeedsHumanDecision inside a task.** A port's answer is Fix or CannotFix. Decisions come from classification (`K-PLATFORM-DROPPED`, `K-CONTRACT`, mechanical problems the recipes left, reverted tasks).
+- **Deferred to 8.4b:** AI diagnosis of `K-UNKNOWN` problems (no edits, it proposes a kind and mapping). No recorded run has an unknown problem left, so 8.4 sends unknowns straight to a person.
+
+**Steps (each test-first, committed separately):**
+- [ ] **1. Knowledge.**
+  - `obligations:` on each mapping, validated: patterns compile, and a mapping with none is allowed but listed.
+  - `behaviour-signatures` (item pattern + value change → kind, `seenIn`), starting with `B-SEC-*` trailing slash → 404 = contract (R26).
+  - `ProblemKnowledge` loads and validates both.
+- [ ] **2. `PortTask` and planning (pure).**
+  - `PortPlanner.Plan(problems, knowledge, attempted)` → tasks in order. API moves are grouped by mapping, in order of first appearance. A mapping already attempted is never planned again, and problems of other kinds create no task.
+  - A task has its files (from the problem subjects), evidence, the mapping's notes and `mustKeep`, and obligation patterns.
+  - Test-failure API moves whose subject isn't a file get their files from `src/main` frames in the evidence. With none, they go to a person.
+- [ ] **3. Acceptance (pure).**
+  - `PortAcceptance.Judge(task, before, after)`: evidence gone, nothing new fails (the rules above), plus the reason when not.
+  - Contract gate: `ObligationCheck(tasks, comparison, behaviourSignatures)` → for each task, the obligation differences that platform signatures don't explain.
+- [ ] **4. Restore.** `IWorkspacePatchRecorder.RestoreAsync(path, treeId, files)`: `git checkout <tree> -- <file>` for files in the tree, and delete files that aren't. A reverted attempt's patch is still recorded and published, labelled reverted. The chain's base stays at the task's base tree.
+- [ ] **5. Applier scope.** `Apply(path, edits, allowedFiles)`: an edit outside the task's files is rejected with the reason. The existing guardrails stay as the backstop.
+- [ ] **6. Port agent request and instructions.**
+  - `PortRequest`: the task, its mapping's notes, `mustKeep`, its obligations with their baseline values, its files, its evidence, and on a repair the exact failure.
+  - Instructions rewritten for one task. Read tools stay repo-wide (reading is harmless and helps); `preview_edits` uses the task's scope.
+  - Decision: Fix or CannotFix.
+- [ ] **7. `PortRunner` replaces `RemediationLoop`.**
+  - Loop: classify → plan → next task → attempt → apply → record → validate → reclassify → judge. If rejected, one repair with the failure as feedback; if still rejected, restore and send it to a person. Then the next task, until none can be worked.
+  - Then the contract gate (when compile passes and a baseline exists): repair each task that broke an obligation once, re-check, and restore the ones still broken.
+  - It reports tasks (status Accepted / Reverted / CannotFix / NotAttempted, with reasons) and every attempt with its task id.
+  - The coordinator calls it where the loop was; its last behaviour comparison is reused, not recomputed, when nothing changed after it.
+- [ ] **8. Remove the old loop:** `RemediationLoop`, `remediation-max-attempts`, `MIGRATION_REMEDIATION_MAX_ATTEMPTS`, `RemediationSettings`. The bounds are fixed: one attempt plus one repair per task, at most 2 probe runs.
+- [ ] **9. Reporting.** Job summary and PR: a tasks table (mapping, files, attempts, status, why; obligations kept / broken / unchecked), attempts listed under their task, and reverted ports shown as "attempted, reverted: needs a person". README "What the AI may and may not do" and the diagram updated.
+- [ ] **10. Verify.**
+  - Unit tests: planning, grouping, acceptance (including revealed errors), revert, ordering, closing, and the contract gate with a platform-explained difference.
+  - Replays: R24 attempt 2 as a task is rejected (`HttpServletRequest` still missing) and reverted. Run 26's attempt 1 HttpClient edit, judged with run 26's records, breaks `connectionTimeToLive`; the trailing-slash 404s are not blamed on the security port.
+  - CI run #27: T1, T2 and T4 as three scoped tasks; T4 either keeps the TTL (accepted) or is repaired or reverted; T5 and T6 are decisions; the contract is checked.
+
+### 8.4b AI diagnosis for unknown problems *(after 8.4)*
+
+- [ ] For a `K-UNKNOWN` problem the AI proposes a kind and a mapping, with evidence, and makes no edits. A person confirms, and confirmed ones become signatures (design §12, accretion).
 
 ### 8.5 One verdict, with reasons (design §8.2) *(no CI)*
 
@@ -472,6 +503,20 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 - Out of scope for the pipeline: merging, releasing and retiring versions. People own them; the pipeline says when each is possible.
 - Verify: with `platform-parent` 2.0.0 published to a test repository, wave 2 becomes eligible and its consumers' parent version is bumped deterministically. A commit to `orders-service` `main` produces a refreshed PR with a drift line.
 
+### 8.13 Persisted estate state (design §17.5)
+
+Needed before 8.12's release-aware gate and refresh mode can work across runs: today every run starts with no previous results.
+
+- [ ] **State layout and model:** `estate/assessment.json`, `waves/wave-N.json`, `repos/<name>.json`, `decisions/`, `runs/ledger.jsonl`, all keyed by stable IDs. Read and written by one `EstateState` store; the existing `transformation-results.json` becomes a per-run output, not the record.
+- [ ] **Reconcile step (facts win):** PRs merged (GitHub), versions published (Maven repository), and default branch moved since the assessed or refreshed commit (→ refresh due, or re-assess on a structural change). Pure logic over a facts interface, unit-tested.
+- [ ] **Workflow:**
+  - check out the state repository at the start; commit and push one commit per run at the end (retry after a rebase);
+  - a `concurrency:` group per estate;
+  - a token scoped to the state repository.
+- [ ] **Approval by PR:** `assess` proposes the assessment and waves as a pull request on the state repository; transforms run only against the merged plan.
+- [ ] Create `spring-modernisation-lab/migration-state` for the demo (a person creates it; the pipeline never creates repositories).
+- Verify: run 1 migrates wave 1 and commits its state; after `platform-parent`'s PR is merged and its version is published, run 2 reads that state, reconciles, and opens wave 2 without wave 1 running again.
+
 ## Phase 6: Document polish (small)
 
 - [x] "AI contribution and control boundaries" table in the migration results document.
@@ -492,7 +537,7 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 
 Done: Phase 3 → 4.1–4.6 → CI runs → Phase 5.
 
-Next: **8.0 → 8.1 (done) → 8.1b (done) → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, 8.11 (sizing: the estimate half can start any time) and 8.12 (releases, refreshes, cut-over), then 6 → 7. Each step is test-first and committed separately.
+Next: **8.0 → 8.1 (done) → 8.1b (done) → 8.3 → 8.2 → 8.4 → 8.5**, then one CI run that tests the redesign as a whole (T3 by recipe, T1/T2/T4 as scoped ports, T5 and T6 as decisions, the contract matching on success). Then 8.6–8.10, 8.11 (sizing: the estimate half can start any time), 8.13 (persisted estate state) and 8.12 (releases, refreshes, cut-over; it needs 8.13), then 6 → 7. Each step is test-first and committed separately.
 
 8.3 comes before 8.2 because classification needs no JDK and can be verified on recorded runs straight away. The contract needs a probe workflow.
 
