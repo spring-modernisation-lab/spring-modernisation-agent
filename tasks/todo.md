@@ -347,6 +347,22 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
 
   Needs a JDK, so it runs in a probe workflow, not locally.
 
+**8.2 progress (steps 1–3 done; step 4, pipeline integration, next):**
+- [x] **Contract model and comparison** (`BehaviourContract`): same, changed, unavailable (unknown is not "same") or allowed by a decision.
+- [x] **Probe** (`BehaviourProbe`, `Config/probe/BehaviourProbe.java.template`, `Config/knowledge/behaviour-probes.yaml`):
+  - discovers the application package, profiles, settings keys and roles from the repository;
+  - generates one test per profile and runs only those, always deleting them afterwards;
+  - records context start, endpoint × role → status (with and without a trailing slash), resolved settings (secret keys as set/unset only), HTTP client values and cache values.
+- [x] **CLI** `behaviour record|compare`, and the probe workflow can compare a baseline with a known migrated tree (`after-patch`).
+- [x] **Probe #7** (run 23's tree): compiled and ran on Boot 2.7 / Java 11 and Boot 3.5 / Java 21, recording 74 behaviours. 11 differences, all explained:
+  - the dropped connection time-to-live, a real loss no test caught;
+  - run 23's hand-written cache replacing the configured one;
+  - `POST /api/orders/` going from **400 to 405**. The 400 on Boot 2.7 shows the trailing-slash POST was **already open to a VIEWER on the baseline**; run 23 closed it, a change for a person to accept;
+  - idle eviction, a **false** difference: HttpClient 5 keeps it only inside the evictor thread's code. Now not probed.
+- [x] **Probe #8** (run 23 with a correct HttpClient 5 port, `R23-with-correct-ttl.patch`): **the time-to-live is `same` (30000ms)**, so the probe reads it on HttpClient 5 when it is set. The remaining 7 differences are only the real ones (the cache, and POST to the trailing slash); 65 are unchanged.
+- [ ] Step 4: record the baseline in the transform pipeline, compare after migration, and put `I-CONTRACT-MATCHES` into the verdict and the PR.
+- [ ] Later: probes for other repository kinds (a library with Spring configuration via a generated test application; parent POMs via the effective POM; plain libraries via characterisation tests). See design §3.
+
 ### 8.3 Problem kinds and knowledge (design §4, §9.2) *(no CI)*
 
 - [x] **`diagnostic-signatures.yaml`**: 7 signatures, ordered, first match wins: `knock-on`, `mechanical` (T3 → the recipe), `platform-dropped` (Ehcache 2, only if the repository uses it), `contract` (an HTTP status changed), and three `api-move`s. Each names the runs it was written from.
