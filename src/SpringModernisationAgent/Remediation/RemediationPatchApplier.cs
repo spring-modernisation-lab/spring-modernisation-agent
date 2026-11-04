@@ -199,6 +199,7 @@ public sealed partial class RemediationPatchApplier
                 {
                     return libraryError;
                 }
+
                 var added = TypeNames(after).Except(TypeNames(before), StringComparer.Ordinal).ToList();
 
                 if (added.Count > 0)

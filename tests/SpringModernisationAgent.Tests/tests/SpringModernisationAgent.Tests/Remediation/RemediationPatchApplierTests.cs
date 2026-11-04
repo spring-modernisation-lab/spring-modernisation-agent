@@ -634,6 +634,29 @@ public class RemediationPatchApplierTests : IDisposable
     }
 
     [Fact]
+    public void Apply_MovingAValueToAnUnrelatedKey_IsNotARenameAndIsRejected()
+    {
+        // Otherwise R21's "type: none" could be written as "drop type, add foo: ehcache".
+        Write(YamlPath, YamlSource);
+
+        var result = Apply(Edit(YamlPath, "    type: ehcache\n", "    unused: ehcache\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("removes the setting spring.cache.type ('ehcache')", result.RejectionReason);
+    }
+
+    [Fact]
+    public void Apply_YamlWithADuplicateKey_IsRejectedNotThrown()
+    {
+        Write(YamlPath, YamlSource);
+
+        var result = Apply(Edit(YamlPath, "    type: ehcache\n", "    type: ehcache\n    type: none\n"));
+
+        Assert.False(result.Applied);
+        Assert.Contains("not valid YAML", result.RejectionReason);
+    }
+
+    [Fact]
     public void Apply_ChangingAPropertiesValue_IsRejected()
     {
         const string path = "src/main/resources/application.properties";

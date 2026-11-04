@@ -1,0 +1,27 @@
+# Lessons
+
+Rules learned while building and driving this pipeline. Each lesson names the run that taught it. Read this before changing policy, the agent's instructions, or the publishing path.
+
+## Policy and guardrails
+
+1. **After a guardrail is bypassed twice, look for an invariant instead of another shape rule.** In R16–R23 the agent re-implemented Ehcache 2 five ways; each shape rule held for one run. What ended it was a fact the AI cannot change: the POM still declares the library, so a green build cannot mean it was migrated (`I-UNSUPPORTED-NEVER-SUCCEEDS`).
+2. **Prove every policy change by replay against recorded proposals, both ways.** The bad proposal must now be rejected, and every legitimate one (R14 attempts 1–4 especially) must still be accepted. A unit test alone missed R23.
+3. **Normalisation steps in a checker are part of the checker, and need their own adversarial tests.** R23's bypass was not in the rule but in the pre-processing: stripping `<…>` as generics also deleted `ttl > 0 … age < max` and the anonymous classes between them. Patterns that delete text must only match what they claim to match.
+4. **The AI optimises for a green build, not for the intent.** Expect it to special-case tests (R16), drop behaviour (R21 removed `@Cacheable` and switched production caching off), or swap in a weaker substitute (R23's fallback cache). Write rules about what must not be lost (annotations, settings, libraries), not only about what must not be added.
+
+## The Remediation Agent
+
+5. **Give it real facts instead of letting it guess.** `describe_class` ended three runs of guessed HttpClient 5 signatures (R13). Telling it up front which libraries are unsupported cut R22 to two attempts.
+6. **Let a decision carry the independent fixes.** In R22 the agent knew the `javax.servlet` fix but could not send it with its decision, so the PR lacked it.
+7. **Its options are not policy.** R22 suggested a hand-written in-memory cache "for tests". The PR shows fixed, pipeline-written manual steps first, and the AI's options are labelled.
+
+## Running and publishing
+
+8. **A step marked `continue-on-error` hides failures: report them in the job summary.** In R21 the PR update failed with a GitHub 500, but the step stayed green.
+9. **Retry only transient errors.** Push retries apply to server errors only; a permission error fails at once, so a bad token is visible straight away.
+10. **One CI run is one sample.** The same code gave Fixed (R14), AttemptsExhausted (R20, R21) and NeedsHumanDecision (R22). Judge behaviour over several runs.
+
+## Documents
+
+11. **Keep facts in one place and derive the rest.** `tasks/todo.md` drifted: its status line, an input name (`open-draft-pr`) and an "AI writes the narrative" claim were out of date. Phase 8 generates run tables from the ledger.
+12. **Never add AI attribution to commits or PRs in any project.**

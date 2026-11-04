@@ -108,9 +108,9 @@ public sealed partial class RemediationPatchApplier
             return $"'{relativePath}': the edited file is not valid YAML.";
         }
 
-        var newValues = updated
+        // Keys the edit added: a removed key may only have been renamed to one of these.
+        var added = updated
             .Where(entry => !original.ContainsKey(entry.Key))
-            .Select(entry => entry.Value)
             .ToList();
 
         foreach (var (key, value) in original)
@@ -123,15 +123,47 @@ public sealed partial class RemediationPatchApplier
                            "Existing settings keep their values (you may rename a key or add new ones); " +
                            "changing what a setting does is a decision for a person.";
                 }
+
+                continue;
             }
-            else if (!newValues.Remove(value))
+
+            var rename = added.FindIndex(entry => IsRename(key, value, entry.Key, entry.Value));
+
+            if (rename < 0)
             {
                 return $"'{relativePath}': removes the setting {Display(key)} ('{value}'). " +
-                       "Existing settings keep their values (you may rename a key or add new ones).";
+                       "Existing settings keep their values (you may rename a key, keeping its last part " +
+                       "and value, or add new ones).";
             }
+
+            added.RemoveAt(rename);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// A rename keeps the value, the document and the key's last part, as
+    /// Spring's own renames do (<c>spring.redis.host</c> to
+    /// <c>spring.data.redis.host</c>). Moving a value to an unrelated key
+    /// would switch the setting off, so it is not a rename.
+    /// </summary>
+    private static bool IsRename(
+        string oldKey,
+        string value,
+        string newKey,
+        string newValue)
+    {
+        static (string Document, string Last) Parts(string key)
+        {
+            var separator = key.IndexOf('|');
+            var path = key[(separator + 1)..];
+            var last = path[(path.LastIndexOf('.') + 1)..];
+            return (key[..(separator + 1)], last);
+        }
+
+        return string.Equals(value, newValue, StringComparison.Ordinal)
+               && Parts(oldKey) == Parts(newKey);
     }
 
     private static string Display(
@@ -179,8 +211,10 @@ public sealed partial class RemediationPatchApplier
         {
             stream.Load(new StringReader(text));
         }
-        catch (YamlException)
+        catch (Exception exception)
+            when (exception is YamlException or ArgumentException or InvalidOperationException)
         {
+            // Duplicate keys surface as ArgumentException from the node dictionary.
             return null;
         }
 

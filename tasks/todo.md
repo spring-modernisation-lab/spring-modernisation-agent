@@ -1,6 +1,6 @@
 # Plan: AI-assisted upgrade demo
 
-Status: Phases 0–2 done. **Phases 3–5 (patch preservation, Remediation Agent, reviewer summary and draft PR) are awaiting review**, rewritten on 3 November 2026.
+Status (4 November 2026): Phases 0–5 built and proven in CI (runs 11–23). **Phase 8 (agent control plane, policy as data, accretion) is the next piece of work**; Phases 6–7 (document polish, rehearsal) follow it. The system model behind Phase 8 is [`docs/system-design.md`](../docs/system-design.md).
 
 ## Goal
 
@@ -16,9 +16,10 @@ Closing message: *automation did what it reliably could; AI handled the long tai
 ### Demo success criteria
 
 - [x] One real CI run in which OpenRewrite leaves at least one genuine compile or test failure (runs 4, 7, 8 and 10: `orders-service` compile fails).
-- [ ] The Remediation Agent fixes it, and Maven validation passes afterwards.
-- [ ] At least one seeded case the AI **can't** or **shouldn't** fix is reported clearly and not "fixed" (this shows the boundary holds).
-- [ ] The artifacts include: the OpenRewrite patch, the AI patch, the validation evidence for each attempt, and the reviewer summary.
+- [x] The Remediation Agent fixes it, and Maven validation passes afterwards (run 14: `orders-service` Fixed in 4 attempts, traps T1–T5).
+- [x] At least one seeded case the AI **can't** or **shouldn't** fix is reported clearly and not "fixed" (run 22: T6 Ehcache 2 → `NeedsHumanDecision`, `[Needs decision]` draft PR). Since `e1850c2` this is also enforced by an invariant, not just the agent's judgement.
+- [x] The artifacts include: the OpenRewrite patch, the AI patch, the validation evidence for each attempt, and the reviewer summary (runs 20 onwards, plus draft PRs).
+- [ ] The same outcome on repeated runs (run 24 onwards; see Phase 7 repeatability).
 
 ### Out of scope for the demo (kept in the backlog)
 
@@ -47,7 +48,7 @@ Multi-wave hand-off (merge, publish, re-assess), durable run store, cross-run pe
 - [x] Every repo in the active wave runs despite peer failures; a failure still blocks the next wave.
 - [x] Strategy document produced in CI (run 10).
 - [x] Extracted diagnostics in the AI input, external dependencies, and the `report` command with the migration results document (`fefb335`).
-- [x] Model: the `spring-migration-strategy` deployment is now **gpt-4.1** (GlobalStandard, pay per use). It attributes the run 10 evidence correctly where nano did not.
+- [x] Model: the `spring-migration-strategy` deployment was moved from nano to gpt-4.1 (it attributed the run 10 evidence correctly where nano did not). It is now **gpt-5-mini** (2025-08-07, GlobalStandard, capacity 150) for both agents; see 4.6.
 - [ ] Backlog: a CI check that each pinned recipe artifact exists on Maven Central.
 - [ ] Backlog: baseline workflow repo list is still hardcoded.
 
@@ -176,18 +177,16 @@ Exposed to the model as Agent Framework function tools. All paths are relative, 
   - Fixes kept: `preview_edits` (same guardrails, in memory, own allowance of 5), rejection reasons name the edit, whole-file edits (empty search = complete new content), behaviour-preservation and compile-as-a-whole instructions.
   - Deployment switched to **gpt-5-mini** (capacity 150; 12 was too low for tool use). Run 4: right structure in all three files, behaviour kept; about 3 small compile errors left for the CI loop (wrong `AuthenticationConfiguration` import, `sqlTypes()` → `getSqlType()`, HttpClient 5 TTL/eviction signatures). 112k/11k tokens, about 2 minutes.
 - [x] **Local loop without Maven** (there is no JDK here): reconstruct the post-OpenRewrite workspace by applying the run 4 / Phase 3 patch to a clean `orders-service` clone. Run the agent against that workspace with real run 10 diagnostics, and review the proposals by eye before any CI run.
-- [ ] CI run 1 (remediation enabled). Expected:
-  1. Traps 1, 2 and 4 are fixed and `compile` passes.
-  2. Trap 3 then surfaces in tests and is fixed.
-  3. Trap 5 returns `NeedsHumanDecision`.
-  Record what actually happens in `tasks/demo-traps.md`.
-- [ ] Record the real token usage and cost per attempt, which replaces the $0.25–$0.75 estimate.
+- [x] CI runs with remediation enabled (13–23). Traps T1, T2 and T4 fixed at compile, T3 fixed once tests run, T5 fixed with a review finding, and T6 ends in `NeedsHumanDecision`. Every run is recorded in `tasks/demo-traps.md`.
+- [x] Token usage per attempt is recorded in the results and the job summary: about 0.3M input tokens for a 2-attempt run (R22) and 0.7M for a 5-attempt run (R21).
+- [ ] Cost in currency per run: part of the run digest (8.3).
 
 ## Phase 5: Reviewer summary and draft PR
 
 - [x] Reviewer summary, written to `Artifacts/summaries/<repo>.md` (`PullRequestContentBuilder`; deterministic review flags from `ReviewFlagDetector`: security changes, request-mapping changes, calls the AI removed and never added back, CI file changes; the AI section reuses the results report's per-repository analysis):
   - **C# writes the facts:** files changed per stage (OpenRewrite vs AI), checks per attempt, final outcome, patch hashes, CI-file changes called out explicitly.
-  - **AI writes the narrative** in one structured call: what OpenRewrite changed, what the AI changed and why, what the reviewer should check, and residual risks.
+  - **AI-written sections are labelled** and limited to two: the decision's *why* and *options* (from the agent's own proposal), and the "AI explanation" reused from the results report's per-repository analysis. There is no separate narrative call.
+  - **Pipeline-written guidance** for unsupported libraries: fixed manual steps, a recommended replacement and alternatives (`7c435f0`), shown above the outcome.
 - [x] `DraftPullRequestPublisher` with `IBranchPusher` (`GitBranchPusher`: token via git environment config, never in arguments) and `IPullRequestApi` (`OctokitPullRequestApi`):
   1. Fresh clone at the source SHA.
   2. `git apply` the cumulative patch.
@@ -195,8 +194,9 @@ Exposed to the model as Agent Framework function tools. All paths are relative, 
   4. Push to `migration/spring-boot-3.5-java-21`. Force-push only to that branch, which makes it idempotent.
   5. Open or update a **draft** PR against the default branch, with the summary as the body.
   6. Record the PR URL in the result.
-- [x] It never pushes to the default branch and never merges. It is off unless the workflow input `open-draft-pr` is set.
-- [ ] `MIGRATION_GITHUB_TOKEN` needs Contents, Pull requests **and Workflows** read/write on the target repos, because recipes change `.github/workflows/*`.
+- [x] It never pushes to the default branch and never merges. It is off unless the workflow input `open-draft-pull-requests` is set.
+- [x] `MIGRATION_GITHUB_TOKEN` has Contents, Pull requests **and Workflows** read/write on the target repos, because recipes change `.github/workflows/*` (regenerated 3 November; `platform-parent`'s workflow change pushed in runs 20–23).
+- [x] Pushes are retried on GitHub server errors (3 tries); publish failures are listed in the job summary (run 21).
 - [x] Tests with a fake publisher and a fake git runner:
   - Skipped when disabled or there is no patch.
   - Branch name is fixed.
@@ -211,6 +211,66 @@ Today the Remediation Agent may not edit test sources at all; a test that needs 
 - [ ] Reject the whole proposal if a test edit touches a method body, an assertion, an expected value or test data; the reason tells the agent this is a human decision.
 - [ ] Flag every accepted test edit in the reviewer summary.
 - [ ] Tests for each case (import-only accepted; assertion change rejected; mixed edit rejected).
+
+## Phase 8: Agent control plane, policy as data, accretion
+
+Design: [`docs/system-design.md`](../docs/system-design.md). The aim is that an agent driving the system can understand any run from one small artifact, verify any policy change against all past runs in seconds, and leave every run's lesson behind as data. Each step lists how it is verified.
+
+### 8.1 Stable identifiers (design §3)
+
+- [ ] Rule IDs as constants (`G-PATH-SCOPE`, `G-EXT`, `G-LIMITS`, `G-MATCH-ONCE`, `G-WHOLE-FILE-SIZE`, `G-DESIGN-TYPES`, `G-DESIGN-ANON`, `G-DESIGN-SUPERTYPE`, `G-LIB-UNSUPPORTED`, `G-TEST-REFERENCE`, `G-BEHAVIOUR-ANNOTATION`, `G-CFG-VALUE`, `G-CFG-REMOVED`, `G-CFG-YAML`). Every rejection reason starts with its ID.
+- [ ] Invariant IDs (`I-UNSUPPORTED-NEVER-SUCCEEDS`, `I-AGENT-DECISION`, `I-MAVEN-AUTHORITATIVE`), fact kinds (`F-…`) and flag IDs (`FLAG-SECURITY`, `FLAG-MAPPING`, `FLAG-CALL-REMOVED`, `FLAG-CI`, `FLAG-LARGE-ADDITION`).
+- [ ] Traps renamed to `T1`–`T6` in `tasks/demo-traps.md`; runs cited as `R<n>`.
+- [ ] Each instruction rule in `RemediationAgent.Instructions` names the rule ID that enforces it. An instruction with no enforcing rule is marked as guidance.
+- Verify: a test asserts every rejection path produces a reason starting with a registered ID; `grep G-DESIGN-ANON` finds the rule, its test, its fixture and the docs.
+
+### 8.2 One verdict function (design §5)
+
+- [ ] `Verdict { State, Reasons[] }` computed in one place from the result. `Succeeded`, `NeedsDecision`, PR eligibility, wave gating and every summary icon read it; nothing re-derives it.
+- [ ] Facts are computed once per repository and passed down: today the coordinator and the Remediation Loop each run `UnsupportedLibraries.FindIn` on the same source.
+- [ ] Reasons are rendered in the job summary, the PR ("Needs decision: `I-UNSUPPORTED-NEVER-SUCCEEDS` (Ehcache 2)") and the results document.
+- Verify: table-driven tests over every state × reason; R22 and R23 results produce `NeedsDecision` with the expected reasons.
+
+### 8.3 Run digest (design §7.2)
+
+- [ ] `digest` command and `run-digest.json` (`schema: digest/1`, about 2 KB): request, verdict and reasons per repository, facts, per-attempt decision/policy/after/flags/tokens, trap IDs fixed, PR, total cost (tokens, minutes, currency at the deployment's rate).
+- [ ] The workflow writes the digest's Markdown form as the job summary and uploads the JSON; the existing `transformation-summary.md` becomes a view of it.
+- [ ] `explain <run-dir> <repo> [--attempt n]` for the detail behind one line of the digest.
+- Verify: golden-file tests for R14, R22 and R23 digests; the digest of R23 alone is enough to state what happened and why it stopped.
+
+### 8.4 Replay as a product command (design §7.3)
+
+- [ ] `replay <run-dir>`: rebuilds each attempt's base tree from the recorded patches and re-runs current policy on the recorded proposal; prints the verdict diff against what was recorded.
+- [ ] `corpus/`: the proposals of R14, R16, R20, R21, R22 and R23, each with its expected verdict (accept, or the rule ID that must reject it).
+- [ ] A test runs the whole corpus, so a policy change that alters any verdict fails until the fixture's expectation is updated in the same commit.
+- Verify: today's results reproduced (R14 all accepted; R16 a2, R20 a2–a3, R21 a3–a5 and R23 a3 rejected by the named rules).
+
+### 8.5 Knowledge as data (design §6.2)
+
+- [ ] Move the unsupported libraries (with manual steps), behaviour annotations and settings rules from C# into `Config/knowledge/*.yaml`, validated at start-up (unknown fields fail).
+- [ ] `api-notes.yaml`: short, checked notes on moved APIs (HttpClient 4 → 5 pool and TTL methods, Hibernate 6 `UserType`, Security 6 adapter removal), offered to the Remediation Agent by a `get_api_notes(topic)` tool.
+- [ ] Adding an entry needs no code change; a test proves an entry added only in YAML is detected, enforced and rendered in the PR.
+- Verify: corpus replay unchanged after the move; the PR manual steps are byte-identical.
+
+### 8.6 Control commands (design §7.1)
+
+- [ ] `run start --request run-request.yaml`: dispatch through the GitHub API with explicit inputs, plus an optional `hypothesis:` the digest checks. The request is uploaded with the results.
+- [ ] `run status <id>` and `run fetch <id>` (artifacts into `runs/R<id>/` with hash verification and a manifest).
+- [ ] Read-only versus side-effecting is stated in `--help`; side-effecting commands are idempotent.
+- Verify: start, status and fetch against a real run; a fetched run directory is self-describing (request, digest, manifest, results, patches, summaries).
+
+### 8.7 Ledger and generated history (design §9.5)
+
+- [ ] `ledger add <run-dir>` appends the digest to `runs/ledger.jsonl`; `ledger show` prints per-trap outcomes and cost across runs, with variance.
+- [ ] The run tables in `tasks/demo-traps.md` are generated from the ledger; the narrative and talking points stay hand-written.
+- Verify: R13–R24 back-filled; the generated table matches today's hand-written facts.
+
+### 8.8 Accretion loops (design §9)
+
+- [ ] Recipe candidates: the ledger counts recurring AI fixes by trap and file, and lists any fix seen in three runs as an OpenRewrite recipe candidate (T3 `javax.servlet` strings is the first).
+- [ ] Decision records: `decisions/<repo>.yaml` (`D-<repo>-<n>`: the chosen replacement and who chose it). The next run reads it, applies the chosen route as a deterministic Change (`actor: Recipe` or `Person`), and the invariant is satisfied by that fact.
+- [ ] Every run that reveals a new workaround ends with a corpus fixture and, where possible, an invariant rather than a new shape rule (design §5: after two bypasses, look for the invariant).
+- Verify: a decision record for `orders-service` (Ehcache 3 via JCache) moves T6 from `NeedsDecision` to a deterministic change in a CI run.
 
 ## Phase 6: Document polish (small)
 
@@ -230,7 +290,9 @@ Today the Remediation Agent may not edit test sources at all; a test that needs 
 
 ## Suggested order
 
-Phase 3 → 4.1 (surefire) → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 local loop → CI run → Phase 5 → 6 → 7. Each step is test-first and committed separately.
+Done: Phase 3 → 4.1–4.6 → CI runs → Phase 5.
+
+Next: **8.1 → 8.2 → 8.3 → 8.4** (identifiers, verdict, digest, replay) → **8.5 → 8.6** (knowledge as data, control commands) → 8.7–8.8 (accretion loops) → 6 → 7. Each step is test-first and committed separately. Steps 8.1–8.4 need no CI run: they are verified against the recorded runs.
 
 ## Open decisions
 
@@ -238,8 +300,16 @@ Phase 3 → 4.1 (surefire) → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 local loop �
 2. **Remediation edit format**: recommend **search/replace blocks**. Each block must match exactly once, which is easy to validate and to show in the demo. A unified diff is the alternative.
 3. ~~Draft PR~~: in scope, on `migration/spring-boot-3.5-java-21`, never merged.
 4. **Test files and `pom.xml` read-only for the AI** (4.4): recommended. It makes the boundary obvious, and the demo traps don't need either to be edited. The cost is that a genuine fix needing a dependency change becomes `NeedsHumanDecision`.
-5. **Draft PR when the outcome is `NeedsHumanDecision`**: the strict rule is "PR only on a pass", which means trap 5 stops the PR. Recommend opening the draft PR anyway in that case, titled `[Needs decision]`, with the decision and options at the top of the body and the failing check shown. The reviewer then sees the boundary where the work happens. A failed or `CannotFix` repo still gets no PR.
+5. ~~Draft PR when the outcome is `NeedsHumanDecision`~~: decided and built. A `[Needs decision]` draft PR puts the decision and options at the top. A `Failed` or `CannotFix` repository gets no PR.
+6. **Policy changes need a replay diff** (Phase 8): a guardrail or knowledge change is finished only when a replay over the recorded proposals shows exactly the intended verdict changes.
 
 ## Review
 
-_(to be completed after implementation)_
+**Phases 3–5 (runs 11–23):**
+- **What held:** the boundary. In every run Maven decided the outcome, the AI never changed tests, POMs or CI, and nothing merged.
+  - The AI did the long tail OpenRewrite left: T1, T2 and T4 at compile, T3 in tests, and T5 with a review finding.
+  - Draft PRs worked for both outcomes (Succeeded and Needs decision).
+- **What didn't hold at first:** stopping at the right place for T6. The agent re-implemented the dropped library five ways across R16–R23 (named types, an anonymous class, inline code plus changed settings, a fallback cache, a parsing cache). Each shape guardrail held only until the next shape.
+  - What ended it was a fact-based invariant: the POM still declares Ehcache 2 and the AI cannot change the POM, so a green build cannot mean it was migrated.
+  - Lesson for Phase 8: prefer invariants over shape rules, and prove every policy change by replay against the recorded runs.
+- **Open:** repeatability (run 24 onwards), cost in currency, and the results document's remediation section (Phase 6).
