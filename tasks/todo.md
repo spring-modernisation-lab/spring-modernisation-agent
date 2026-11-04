@@ -412,7 +412,7 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
   - `obligations:` on each mapping, validated: patterns compile, and a mapping with none is allowed but listed.
   - `behaviour-signatures` (item pattern + value change → kind, `seenIn`), starting with `B-SEC-*` trailing slash → 404 = contract (R26).
   - `ProblemKnowledge` loads and validates both.
-- [ ] **2. `PortTask` and planning (pure).**
+- [x] **2. `PortTask` and planning (pure).** (`Porting/PortPlanner`, 6 tests. Changed while building: an API move seen only as a failing test, or in test code, goes to a person with the reason. Guessing files from stack frames would be guessing a scope, and no run has one.)
   - `PortPlanner.Plan(problems, knowledge, attempted)` → tasks in order. API moves are grouped by mapping, in order of first appearance. A mapping already attempted is never planned again, and problems of other kinds create no task.
   - A task has its files (from the problem subjects), evidence, the mapping's notes and `mustKeep`, and obligation patterns.
   - Test-failure API moves whose subject isn't a file get their files from `src/main` frames in the evidence. With none, they go to a person.
