@@ -79,6 +79,20 @@ public static class TransformationSummaryWriter
             }
         }
 
+        foreach (var result in results.Where(result => result.Behaviour is not null))
+        {
+            markdown.AppendLine();
+            markdown.AppendLine($"### {result.Transformation.RepositoryName}: behaviour contract");
+            markdown.AppendLine();
+            markdown.AppendLine(BehaviourText.Summary(result.Behaviour!));
+
+            if (result.Behaviour!.Comparison is { } comparison && comparison.Differences.Count > 0)
+            {
+                markdown.AppendLine();
+                markdown.Append(BehaviourText.Differences(comparison));
+            }
+        }
+
         foreach (var result in results.Where(result => result.Problems.Count > 0))
         {
             AppendProblems(markdown, result.Transformation.RepositoryName, result.Problems);

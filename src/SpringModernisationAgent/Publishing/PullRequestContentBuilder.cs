@@ -78,6 +78,7 @@ public static class PullRequestContentBuilder
 
         AppendUnsupportedLibraries(body, result, libraries);
         AppendOutcome(body, result);
+        AppendBehaviour(body, result.Behaviour);
         AppendFlags(body, flags);
         AppendRecipeDiscovery(body, result.RecipeDiscovery);
         AppendChanges(body, result);
@@ -148,6 +149,16 @@ public static class PullRequestContentBuilder
                     "**Maven passed anyway.** That means the AI's changes work around the library rather than " +
                     "replace it. Read them closely, starting with the review flags, before keeping any of them.");
             }
+        }
+
+        if (result.Validation.Status == TransformationValidationStatus.Passed && result.Behaviour is { Baseline: not null, Holds: false })
+        {
+            body.AppendLine();
+            body.AppendLine(
+                result.Behaviour.Comparison is null
+                    ? $"Maven passed, but the behaviour contract could not be checked ({result.Behaviour.Note}). A person must confirm the behaviour is unchanged."
+                    : $"Maven passed, but the migrated application behaves differently from the Boot 2.7 one in {result.Behaviour.Comparison.Differences.Count} " +
+                      "ways (see **Behaviour compared with the Boot 2.7 application**). Fix each difference or accept it with a decision.");
         }
 
         if (proposal is not null)
@@ -269,6 +280,37 @@ public static class PullRequestContentBuilder
             };
 
             body.AppendLine($"- **{label}** `{flag.Path}` ({flag.Stage}): {flag.Detail}");
+        }
+
+        body.AppendLine();
+    }
+
+    /// <summary>What the migrated application does differently from the Boot 2.7 one (the behaviour contract).</summary>
+    private static void AppendBehaviour(
+        StringBuilder body,
+        BehaviourReport? behaviour)
+    {
+        if (behaviour is null)
+        {
+            return;
+        }
+
+        body.AppendLine("## Behaviour compared with the Boot 2.7 application");
+        body.AppendLine();
+        body.AppendLine(
+            "Recorded by the pipeline on both versions: whether each profile starts, who can call each endpoint, " +
+            "resolved settings, and HTTP client and cache values. Not AI-generated.");
+        body.AppendLine();
+        body.AppendLine(BehaviourText.Summary(behaviour));
+
+        if (behaviour.Comparison is { } comparison && comparison.Differences.Count > 0)
+        {
+            body.AppendLine();
+            body.Append(BehaviourText.Differences(comparison));
+            body.AppendLine();
+            body.AppendLine(
+                "Each difference needs a person: fix it, or accept it with a decision record. A difference can be an " +
+                "improvement (for example a request path that was open on Boot 2.7 and is closed now), but it is still a change.");
         }
 
         body.AppendLine();

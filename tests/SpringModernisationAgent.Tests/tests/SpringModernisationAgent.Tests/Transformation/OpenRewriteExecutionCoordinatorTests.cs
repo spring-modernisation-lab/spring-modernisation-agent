@@ -641,6 +641,57 @@ public class OpenRewriteExecutionCoordinatorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_BehaviourBaselineIsRecordedBeforeOpenRewriteAndComparedAfterwards()
+    {
+        var runner = new FakeOpenRewriteRunner();
+        var contract = new FakeContract(runner);
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var result = await CreateCoordinator(
+                    new FakeWorkspaceProvider { Workspace = new RepositoryWorkspace("customer-service", workspacePath, CommitSha) },
+                    new FakeRepositoryWorkspaceCleaner(),
+                    runner,
+                    behaviour: contract)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            Assert.False(contract.OpenRewriteHadRunAtBaseline);
+            Assert.True(contract.OpenRewriteHadRunAtComparison);
+            Assert.Same(FakeContract.Compared, result.Behaviour);
+            Assert.True(result.Succeeded);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+        }
+    }
+
+    private sealed class FakeContract(FakeOpenRewriteRunner runner) : SpringModernisationAgent.Behaviour.IBehaviourContractRecorder
+    {
+        private static readonly SpringModernisationAgent.Behaviour.BehaviourRecord Record =
+            new("behaviour/1", "customer-service", CommitSha, new Dictionary<string, string> { ["B-CTX-default"] = "starts" });
+
+        public static readonly BehaviourReport Compared = new(Record, Record, SpringModernisationAgent.Behaviour.BehaviourContract.Compare(Record, Record), null);
+
+        public bool OpenRewriteHadRunAtBaseline { get; private set; }
+
+        public bool OpenRewriteHadRunAtComparison { get; private set; }
+
+        public Task<BehaviourReport?> RecordBaselineAsync(TransformationPlan plan, string repositoryPath, CancellationToken cancellationToken = default)
+        {
+            OpenRewriteHadRunAtBaseline = runner.Called;
+            return Task.FromResult<BehaviourReport?>(new BehaviourReport(Record, null, null, null));
+        }
+
+        public Task<BehaviourReport> CompareAsync(TransformationPlan plan, string repositoryPath, BehaviourReport baseline, TransformationValidationResult validation, CancellationToken cancellationToken = default)
+        {
+            OpenRewriteHadRunAtComparison = runner.Called;
+            return Task.FromResult(Compared);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ValidationPasses_DoesNotRunRecipeDiscovery()
     {
         var discovery = new FakeRecipeDiscovery();
@@ -861,7 +912,8 @@ public class OpenRewriteExecutionCoordinatorTests
         IWorkspacePatchRecorder? patchRecorder = null,
         IRemediationLoop? remediationLoop = null,
         IRecipeDiscovery? recipeDiscovery = null,
-        ProblemKnowledge? problemKnowledge = null)
+        ProblemKnowledge? problemKnowledge = null,
+        SpringModernisationAgent.Behaviour.IBehaviourContractRecorder? behaviour = null)
     {
         var executionPlanBuilder =
             new OpenRewriteExecutionPlanBuilder();
@@ -885,7 +937,8 @@ public class OpenRewriteExecutionCoordinatorTests
             patchRecorder ?? new FakePatchRecorder(),
             remediationLoop,
             recipeDiscovery: recipeDiscovery,
-            problemKnowledge: problemKnowledge);
+            problemKnowledge: problemKnowledge,
+            behaviour: behaviour);
     }
 
     private sealed class FakeRecipeDiscovery : IRecipeDiscovery

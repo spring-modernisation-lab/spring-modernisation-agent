@@ -26,6 +26,12 @@ on:
           left, and measure them on a throwaway copy (no AI; suggestions only)
         type: boolean
         default: true
+      behaviour-contract:
+        description: >-
+          Record what each application does on Boot 2.7 and check the migrated
+          one does the same (success needs both Maven and the contract)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -172,6 +178,15 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # The behaviour contract records the Boot 2.7 baseline with the JDK it
+      # was built for; Java 21, set up next, stays the default.
+      - name: Set up Java 11 (behaviour baseline)
+        id: java11
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "11"
+
       - name: Set up Java 21
         uses: actions/setup-java@v5
         with:
@@ -235,6 +250,8 @@ jobs:
           MIGRATION_REMEDIATION: ${{ (inputs.remediation && steps.azure_login.outcome == 'success') && 'enabled' || 'disabled' }}
           MIGRATION_REMEDIATION_MAX_ATTEMPTS: ${{ inputs.remediation-max-attempts }}
           MIGRATION_RECIPE_DISCOVERY: ${{ inputs.recipe-discovery && 'enabled' || 'disabled' }}
+          MIGRATION_BEHAVIOUR_CONTRACT: ${{ inputs.behaviour-contract && 'enabled' || 'disabled' }}
+          MIGRATION_BASELINE_JAVA_HOME: ${{ steps.java11.outputs.path }}
           FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
           FOUNDRY_MODEL: ${{ vars.FOUNDRY_MODEL }}
           FOUNDRY_AUTH_MODE: AzureCli

@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Behaviour;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SpringModernisationAgent.Build;
@@ -392,12 +393,52 @@ public sealed class TransformCommand
                 progress,
                 recipeDiscovery,
                 ProblemKnowledge.LoadDefault(
-                    UnsupportedLibraries.All.Select(library => library.Name).ToList()));
+                    UnsupportedLibraries.All.Select(library => library.Name).ToList()),
+                CreateBehaviourContract(
+                    mavenProcessRunner,
+                    progress));
 
         return new MigrationWaveExecutor(
             wavePlanner,
             repositorySelector,
             executionCoordinator);
+    }
+
+    /// <summary>
+    /// The behaviour contract runs unless MIGRATION_BEHAVIOUR_CONTRACT is
+    /// "disabled". The baseline is built with MIGRATION_BASELINE_JAVA_HOME
+    /// (the source platform's JDK) when set; the migrated application with
+    /// the JDK Maven finds by default.
+    /// </summary>
+    private static IBehaviourContractRecorder? CreateBehaviourContract(
+        IMavenProcessRunner targetMaven,
+        IMigrationProgress progress)
+    {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("MIGRATION_BEHAVIOUR_CONTRACT"),
+                "disabled",
+                StringComparison.Ordinal))
+        {
+            Console.WriteLine("Behaviour contract: disabled for this run.");
+            return null;
+        }
+
+        var baselineJavaHome = Environment.GetEnvironmentVariable("MIGRATION_BASELINE_JAVA_HOME");
+
+        var baselineMaven = string.IsNullOrWhiteSpace(baselineJavaHome)
+            ? targetMaven
+            : new MavenProcessRunner(new Dictionary<string, string> { ["JAVA_HOME"] = baselineJavaHome });
+
+        var configuration = ProbeConfiguration.LoadDefault();
+
+        Console.WriteLine(
+            "Behaviour contract: enabled (baseline JDK: " +
+            (string.IsNullOrWhiteSpace(baselineJavaHome) ? "the default" : baselineJavaHome) + ").");
+
+        return new BehaviourContractRecorder(
+            new ProbeRecorder(new BehaviourProbe(baselineMaven, configuration)),
+            new ProbeRecorder(new BehaviourProbe(targetMaven, configuration)),
+            progress);
     }
 
     /// <summary>

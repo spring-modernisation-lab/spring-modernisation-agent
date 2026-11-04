@@ -13,7 +13,8 @@ public sealed record TransformationExecutionResult(
     public bool Succeeded =>
         Transformation.Status == TransformationStatus.Succeeded
         && Validation.Status == TransformationValidationStatus.Passed
-        && UnsupportedLibraries.Count == 0;
+        && UnsupportedLibraries.Count == 0
+        && BehaviourHoldsOrWasNotRecorded;
 
     /// <summary>
     /// A person must choose before this can proceed: the Remediation Agent
@@ -23,7 +24,17 @@ public sealed record TransformationExecutionResult(
     public bool NeedsDecision =>
         Transformation.Status == TransformationStatus.Succeeded
         && (Remediation?.Outcome == RemediationOutcome.NeedsHumanDecision
-            || UnsupportedLibraries.Count > 0);
+            || UnsupportedLibraries.Count > 0
+            || (Validation.Status == TransformationValidationStatus.Passed && !BehaviourHoldsOrWasNotRecorded));
+
+    /// <summary>
+    /// Invariant I-CONTRACT-MATCHES: when a baseline was recorded, success
+    /// also needs the migrated application to behave the same (or every
+    /// difference to be allowed by a decision). A baseline whose comparison
+    /// could not be made does not count as holding.
+    /// </summary>
+    private bool BehaviourHoldsOrWasNotRecorded =>
+        Behaviour?.Baseline is null || Behaviour.Holds;
 
     /// <summary>
     /// Preserved patches, in stage order, plus <c>cumulative</c>. Empty for
@@ -65,4 +76,7 @@ public sealed record TransformationExecutionResult(
     /// Empty when validation passed or classification was off.
     /// </summary>
     public IReadOnlyList<SpringModernisationAgent.Triage.ClassifiedProblem> Problems { get; init; } = [];
+
+    /// <summary>The behaviour contract; null when it was off or the repository can't be probed.</summary>
+    public BehaviourReport? Behaviour { get; init; }
 }

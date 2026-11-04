@@ -1,6 +1,11 @@
 namespace SpringModernisationAgent.Build;
 
-public sealed class MavenProcessRunner : IMavenProcessRunner
+/// <param name="environment">
+/// Extra environment for Maven, for example <c>JAVA_HOME</c> to build the
+/// Boot 2.7 baseline with the JDK it was made for.
+/// </param>
+public sealed class MavenProcessRunner(
+    IReadOnlyDictionary<string, string>? environment = null) : IMavenProcessRunner
 {
     public Task<MavenProcessResult> RunAsync(
         string workingDirectory,
@@ -11,5 +16,6 @@ public sealed class MavenProcessRunner : IMavenProcessRunner
             "Maven",
             workingDirectory,
             arguments,
-            cancellationToken);
+            cancellationToken,
+            environment);
 }

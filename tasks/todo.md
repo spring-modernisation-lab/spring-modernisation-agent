@@ -360,7 +360,16 @@ Why: T3 had a recipe building block all along, and nobody looked. Each step belo
   - `POST /api/orders/` going from **400 to 405**. The 400 on Boot 2.7 shows the trailing-slash POST was **already open to a VIEWER on the baseline**; run 23 closed it, a change for a person to accept;
   - idle eviction, a **false** difference: HttpClient 5 keeps it only inside the evictor thread's code. Now not probed.
 - [x] **Probe #8** (run 23 with a correct HttpClient 5 port, `R23-with-correct-ttl.patch`): **the time-to-live is `same` (30000ms)**, so the probe reads it on HttpClient 5 when it is set. The remaining 7 differences are only the real ones (the cache, and POST to the trailing slash); 65 are unchanged.
-- [ ] Step 4: record the baseline in the transform pipeline, compare after migration, and put `I-CONTRACT-MATCHES` into the verdict and the PR.
+- [x] Step 4, in the pipeline (`BehaviourContractRecorder`):
+  - **Baseline:** recorded on the assessed commit **before OpenRewrite**, with the source JDK (`MIGRATION_BASELINE_JAVA_HOME`, Java 11 in the workflow). Its build output is then deleted so nothing compiled for Java 11 reaches the Java 21 build.
+  - **Comparison:** after validation and remediation, once the cumulative patch is recorded, on Java 21. It's skipped when the migrated code doesn't compile.
+  - Repositories with no Boot application (for example `platform-parent`) have no contract. Probe failures become notes, never exceptions.
+- [x] **Verdict, `I-CONTRACT-MATCHES`:** Succeeded needs Maven **and** the contract (when a baseline exists). Maven passing with a changed behaviour, or with a comparison that couldn't be made, is **Needs decision**. A difference with failing tests is still Failed.
+- [x] **Reporting:**
+  - the job summary has a "behaviour contract" section with a differences table;
+  - the PR has "Behaviour compared with the Boot 2.7 application", and the decision section explains when Maven passed but the behaviour changed.
+- [x] Workflow input `behaviour-contract` (on by default) and a Java 11 setup in the transform job. 11 tests (recorder, verdict, reporting, coordinator ordering). 644 pass.
+- [ ] Confirm in CI with a transform run with remediation **on**, so the migrated code compiles and the comparison runs end to end.
 - [ ] Later: probes for other repository kinds (a library with Spring configuration via a generated test application; parent POMs via the effective POM; plain libraries via characterisation tests). See design §3.
 
 ### 8.3 Problem kinds and knowledge (design §4, §9.2) *(no CI)*

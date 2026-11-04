@@ -1,3 +1,4 @@
+using SpringModernisationAgent.Behaviour;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Recipes;
 using SpringModernisationAgent.Remediation;
@@ -18,6 +19,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly IMigrationProgress _progress;
     private readonly IRecipeDiscovery? _recipeDiscovery;
     private readonly ProblemKnowledge? _problemKnowledge;
+    private readonly IBehaviourContractRecorder? _behaviour;
 
     public OpenRewriteExecutionCoordinator(
     IRepositoryWorkspaceProvider workspaceProvider,
@@ -29,7 +31,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     IRemediationLoop? remediationLoop = null,
     IMigrationProgress? progress = null,
     IRecipeDiscovery? recipeDiscovery = null,
-    ProblemKnowledge? problemKnowledge = null)
+    ProblemKnowledge? problemKnowledge = null,
+    IBehaviourContractRecorder? behaviour = null)
     {
         ArgumentNullException.ThrowIfNull(workspaceProvider);
         ArgumentNullException.ThrowIfNull(workspaceCleaner);
@@ -54,6 +57,9 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
         // Null means failures are not classified (tests that don't need it).
         _problemKnowledge = problemKnowledge;
+
+        // Null means the behaviour contract is off for this run.
+        _behaviour = behaviour;
     }
 
     private IReadOnlyList<ClassifiedProblem> Classify(
@@ -138,6 +144,11 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 workspace.RepositoryPath);
 
             // Read from the assessed source, before anything changes it.
+            // The baseline: the assessed commit, before anything changes it.
+            var behaviourBaseline = _behaviour is null
+                ? null
+                : await _behaviour.RecordBaselineAsync(transformationPlan, workspace.RepositoryPath, cancellationToken);
+
             var unsupportedLibraries = UnsupportedLibraries.FindIn(workspace.RepositoryPath)
                 .Select(library => library.Name)
                 .ToList();
@@ -258,6 +269,17 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 patchRecordingError ??= cumulativeError;
             }
 
+            // After the cumulative patch, so the probe (which it writes and
+            // deletes) can never reach a patch.
+            var behaviour = behaviourBaseline is null
+                ? null
+                : await _behaviour!.CompareAsync(
+                    transformationPlan,
+                    workspace.RepositoryPath,
+                    behaviourBaseline,
+                    validationResult,
+                    cancellationToken);
+
             var result = new TransformationExecutionResult(
                 Transformation: transformationResult,
                 Validation: validationResult)
@@ -267,7 +289,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 Remediation = remediation,
                 UnsupportedLibraries = unsupportedLibraries,
                 RecipeDiscovery = recipeDiscovery,
-                Problems = problems
+                Problems = problems,
+                Behaviour = behaviour
             };
 
             _progress.Report(
