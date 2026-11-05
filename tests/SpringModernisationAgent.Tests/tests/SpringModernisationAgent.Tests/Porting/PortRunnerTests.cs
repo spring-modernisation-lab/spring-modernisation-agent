@@ -22,6 +22,9 @@ public class PortRunnerTests : IDisposable
     private const string Order = "src/main/java/a/domain/CustomerOrder.java";
     private const string Http = "src/main/java/a/config/InventoryClientConfiguration.java";
     private const string Money = "src/main/java/a/persistence/MoneyUserType.java";
+    private const string Controller = "src/main/java/a/web/OrderController.java";
+
+    private const string ControllerAtRecipes = "@RequestMapping(\"/api/orders\")\nclass OrderController { /* recipes */ }\n";
 
     private static readonly Dictionary<string, string[]> Errors = new()
     {
@@ -208,6 +211,134 @@ public class PortRunnerTests : IDisposable
         Assert.Equal(PortTaskStatus.Error, result.Report.Tasks[0].Status);
     }
 
+    // Run 27: the code compiles, and one test still fails on the trailing slash.
+    private static readonly BehaviourRecord TrailingSlashBaseline = Record(
+        ("B-CTX-default", "starts"),
+        ("B-SEC-default-GET /api/orders-VIEWER", "200"),
+        ("B-SEC-default-GET /api/orders/-VIEWER", "200"),
+        ("B-SEC-default-POST /api/orders/-VIEWER", "400"));
+
+    private static readonly BehaviourRecord TrailingSlashGone = Record(
+        ("B-CTX-default", "starts"),
+        ("B-SEC-default-GET /api/orders-VIEWER", "200"),
+        ("B-SEC-default-GET /api/orders/-VIEWER", "404"),
+        ("B-SEC-default-POST /api/orders/-VIEWER", "404"));
+
+    [Fact]
+    public async Task RunAsync_ADecisionPort_IsKeptWhenTheTestPassesAndThePathsAreRestored()
+    {
+        var input = await DecisionInputAsync("keep");
+        var agent = new FakeAgent(Fix(Controller));
+        var behaviour = new FakeBehaviour(TrailingSlashBaseline);
+
+        var result = await Runner(agent, new FakeValidator(Passes()), behaviour).RunAsync(input);
+
+        var task = Assert.Single(result.Report.Tasks);
+        Assert.Equal(("D-orders-service-1", PortTaskStatus.Accepted), (task.Mapping, task.Status));
+        Assert.Equal(["B-SEC-default-GET /api/orders/-VIEWER", "B-SEC-default-POST /api/orders/-VIEWER"], task.ObligationsKept);
+        Assert.Equal([Controller], agent.Requests[0].Task.Files);
+        Assert.Equal("400", agent.Requests[0].Obligations["B-SEC-default-POST /api/orders/-VIEWER"]);
+        Assert.Equal("D-orders-service-1", result.Report.Attempts[0].Task);
+        Assert.Equal(RemediationOutcome.Fixed, result.Report.Outcome);
+        Assert.True(result.FinalValidation.Passed);
+        Assert.NotNull(result.Behaviour);
+    }
+
+    [Fact]
+    public async Task RunAsync_ADecisionPortThatLeavesTheTestFailing_IsRepairedThenReverted()
+    {
+        var input = await DecisionInputAsync("keep");
+        var agent = new FakeAgent(Fix(Controller, "first"), Fix(Controller, "second"));
+        var validator = new FakeValidator(ContractTestFails(), ContractTestFails());
+
+        var result = await Runner(agent, validator).RunAsync(input);
+
+        var task = Assert.Single(result.Report.Tasks);
+        Assert.Equal(PortTaskStatus.Reverted, task.Status);
+        Assert.Equal([1, 2], task.Attempts);
+        Assert.Contains("still fails", task.Reason);
+        Assert.Equal(ControllerAtRecipes, Read(Controller));
+        Assert.Equal(RemediationOutcome.NeedsHumanDecision, result.Report.Outcome);
+    }
+
+    [Fact]
+    public async Task RunAsync_ADecisionPortThatPassesTheTestButLeavesThe404s_IsNotExcusedByThePlatformSignature()
+    {
+        // The test passes some other way, but the paths a client calls still 404: BS-TRAILING-SLASH must not excuse that here.
+        var input = await DecisionInputAsync("keep");
+        var agent = new FakeAgent(Fix(Controller, "first"), Fix(Controller, "second"));
+        var behaviour = new FakeBehaviour(TrailingSlashGone, TrailingSlashGone);
+        var validator = new FakeValidator(Passes(), Passes(), ContractTestFails());
+
+        var result = await Runner(agent, validator, behaviour).RunAsync(input);
+
+        var task = Assert.Single(result.Report.Tasks);
+        Assert.Equal(PortTaskStatus.Reverted, task.Status);
+        Assert.Contains("still changed kept behaviour", task.Reason);
+        Assert.Equal(2, task.ObligationsBroken.Count);
+        Assert.Empty(task.ObligationsExplained);
+        Assert.Equal(ControllerAtRecipes, Read(Controller));
+        Assert.Equal(2, behaviour.Calls);
+        Assert.Contains(agent.Requests[1].Repair!.Failure, line => line.Contains("B-SEC-default-GET /api/orders/-VIEWER: 200 → 404", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_ADecisionWithNothingToAnswer_IsANoteForAPerson_NotATask()
+    {
+        var input = await DecisionInputAsync("keep") with { Problems = [] };
+        var agent = new FakeAgent();
+
+        var result = await Runner(agent, new FakeValidator()).RunAsync(input);
+
+        Assert.Empty(agent.Requests);
+        Assert.Empty(result.Report.Tasks);
+        Assert.Contains(result.Report.DecisionNotes, note => note.Contains("no problem left that it answers", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_RetireAndManualDecisions_NeverCallTheAI()
+    {
+        var input = await DecisionInputAsync("retire");
+        var agent = new FakeAgent();
+
+        var result = await Runner(agent, new FakeValidator()).RunAsync(input);
+
+        Assert.Empty(agent.Requests);
+        Assert.Empty(result.Report.Tasks);
+        Assert.Empty(result.Report.DecisionNotes);
+    }
+
+    /// <summary>A workspace whose code compiles and whose only failure is the trailing-slash test, with a recorded decision.</summary>
+    private async Task<PortRunInput> DecisionInputAsync(
+        string option)
+    {
+        var input = await SetUpAsync();
+        var validation = ContractTestFails();
+        var playbook = Knowledge.Decisions.Subject("trailing-slash")!;
+
+        return input with
+        {
+            Validation = validation,
+            Problems = ProblemClassifier.Classify(Knowledge, ValidationDiagnosticsExtractor.ExtractUnbounded(validation.Checks[1]), []),
+            Baseline = new BehaviourReport(TrailingSlashBaseline, null, null, null),
+            Decisions = [new DecisionRecord("D-orders-service-1", "trailing-slash", option, "a-person", "2026-11-05", playbook, playbook.Option(option)!)]
+        };
+    }
+
+    private static TransformationValidationResult ContractTestFails() =>
+        new("orders-service", "abc", TransformationValidationStatus.Failed,
+        [
+            new TransformationValidationCheckResult("compile", true, null, null),
+            new TransformationValidationCheckResult("unit-tests", false, null, null)
+            {
+                FailingTests =
+                [
+                    new FailingTest("a.web.OrderControllerTests", "legacyClientsCanListOrdersUsingTrailingSlash", "failure",
+                        "AssertionError", "Status expected:<200> but was:<404>", null, [])
+                ]
+            }
+        ]);
+
     public void Dispose()
     {
         if (!Directory.Exists(_root))
@@ -249,6 +380,8 @@ public class PortRunnerTests : IDisposable
             Write(file, $"class {Path.GetFileNameWithoutExtension(file)} {{ /* source */ }}\n");
         }
 
+        Write(Controller, "@RequestMapping(\"/api/orders\")\nclass OrderController { /* source */ }\n");
+
         await GitAsync("add", "-A");
         await GitAsync("commit", "--quiet", "-m", "Initial");
         var commit = (await GitAsync("rev-parse", "HEAD")).Trim();
@@ -257,6 +390,8 @@ public class PortRunnerTests : IDisposable
         {
             Write(file, $"class {Path.GetFileNameWithoutExtension(file)} {{ /* recipes */ }}\n");
         }
+
+        Write(Controller, ControllerAtRecipes);
 
         var recorder = new GitWorkspacePatchRecorder(_git, Path.Combine(_root, "Artifacts"));
         var openRewrite = await recorder.RecordAsync(Repository, "orders-service", commit, "01-openrewrite");

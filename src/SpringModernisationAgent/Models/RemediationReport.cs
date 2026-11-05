@@ -43,6 +43,9 @@ public sealed record RemediationReport(
     /// <summary>Problems no task worked, with why: they go to a person.</summary>
     public IReadOnlyList<string> LeftForAPerson { get; init; } = [];
 
+    /// <summary>Why a recorded decision produced no task (nothing left to answer, no baseline, no file), so it is never silent.</summary>
+    public IReadOnlyList<string> DecisionNotes { get; init; } = [];
+
     /// <summary>
     /// Whether a patch stage is AI-written code that is in the final tree: an
     /// applied attempt that was kept, of a task that ended accepted. Reverted

@@ -19,7 +19,11 @@ public sealed record PortRunInput(
     TransformationValidationResult Validation,
     IReadOnlyList<ClassifiedProblem> Problems,
     IReadOnlyCollection<string> UnsupportedLibraries,
-    BehaviourReport? Baseline);
+    BehaviourReport? Baseline)
+{
+    /// <summary>A person's recorded choices (docs/system-design.md §12.1), already validated against the playbooks.</summary>
+    public IReadOnlyList<DecisionRecord> Decisions { get; init; } = [];
+}
 
 /// <param name="FinalValidation">Maven's last result, which decides success.</param>
 /// <param name="AttemptPatches">Every recorded attempt patch, in order, kept or reverted.</param>
@@ -113,6 +117,7 @@ public sealed class PortRunner : IPortRunner
         try
         {
             await PortAsync(run, context, cancellationToken);
+            await DecisionsAsync(run, context, cancellationToken);
             await ContractGateAsync(run, context, cancellationToken);
         }
         catch (PortInfrastructureException exception)
@@ -146,30 +151,65 @@ public sealed class PortRunner : IPortRunner
                 return;
             }
 
-            var task = plan.Tasks[0];
-            var state = run.Start(task);
-
-            _progress.Report(
-                context.Input.Plan.RepositoryName,
-                $"port {task.Id}: {task.Files.Count} file(s), {task.Problems.Count} problem(s)");
-
-            var first = await AttemptAsync(run, context, task, null, cancellationToken);
-
-            var final = first.Kind == AttemptKind.NotKept
-                ? await AttemptAsync(run, context, task, new PortRepair(first.Reason!, first.Feedback), cancellationToken)
-                : first;
-
-            state.Record = state.Record with
-            {
-                Status = final.Kind switch
-                {
-                    AttemptKind.Kept => PortTaskStatus.Accepted,
-                    AttemptKind.CannotFix => PortTaskStatus.CannotFix,
-                    _ => PortTaskStatus.Reverted
-                },
-                Reason = final.Kind == AttemptKind.Kept ? null : final.Reason
-            };
+            await WorkAsync(run, context, plan.Tasks[0], cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// The recorded decisions that are ports (docs/system-design.md §12.1),
+    /// worked like any other task once the API moves are done, so the test
+    /// they answer has been reached. A decision with nothing to port says why.
+    /// </summary>
+    private async Task DecisionsAsync(
+        Run run,
+        AttemptContext context,
+        CancellationToken cancellationToken)
+    {
+        var input = context.Input;
+
+        if (input.Decisions.Count == 0)
+        {
+            return;
+        }
+
+        var plan = DecisionTasks.Plan(input.Decisions, input.Baseline?.Baseline, input.Workspace.RepositoryPath, run.Problems);
+        run.DecisionNotes.AddRange(plan.Notes);
+
+        foreach (var task in plan.Tasks)
+        {
+            await WorkAsync(run, context, task, cancellationToken);
+        }
+    }
+
+    /// <summary>One attempt at a task, one repair if it was not kept, and how it ended.</summary>
+    private async Task WorkAsync(
+        Run run,
+        AttemptContext context,
+        PortTask task,
+        CancellationToken cancellationToken)
+    {
+        var state = run.Start(task);
+
+        _progress.Report(
+            context.Input.Plan.RepositoryName,
+            $"port {task.Id}: {task.Files.Count} file(s), {task.Problems.Count} problem(s)");
+
+        var first = await AttemptAsync(run, context, task, null, cancellationToken);
+
+        var final = first.Kind == AttemptKind.NotKept
+            ? await AttemptAsync(run, context, task, new PortRepair(first.Reason!, first.Feedback), cancellationToken)
+            : first;
+
+        state.Record = state.Record with
+        {
+            Status = final.Kind switch
+            {
+                AttemptKind.Kept => PortTaskStatus.Accepted,
+                AttemptKind.CannotFix => PortTaskStatus.CannotFix,
+                _ => PortTaskStatus.Reverted
+            },
+            Reason = final.Kind == AttemptKind.Kept ? null : final.Reason
+        };
     }
 
     /// <summary>
@@ -549,6 +589,8 @@ public sealed class PortRunner : IPortRunner
 
         public IReadOnlyList<UnworkableProblem> Left { get; set; } = [];
 
+        public List<string> DecisionNotes { get; } = [];
+
         public BehaviourReport? Behaviour { get; set; }
 
         public bool RevertedAfterGate { get; set; }
@@ -567,7 +609,8 @@ public sealed class PortRunner : IPortRunner
                 new RemediationReport(outcome, Attempts.ToList())
                 {
                     Tasks = Tasks.Values.Select(task => task.Record).ToList(),
-                    LeftForAPerson = Left.Select(left => $"{left.Problem.Id} {left.Problem.Subject}: {left.Reason}").ToList()
+                    LeftForAPerson = Left.Select(left => $"{left.Problem.Id} {left.Problem.Subject}: {left.Reason}").ToList(),
+                    DecisionNotes = DecisionNotes.ToList()
                 },
                 Validation,
                 Patches.ToList(),
