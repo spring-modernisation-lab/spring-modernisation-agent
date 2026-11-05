@@ -344,9 +344,45 @@ The run tables in `tasks/demo-traps.md` are generated from it.
 
 1. **Durable fixes (primary, §5).** Accepted ports become recipes, mappings and signatures.
 2. **Contract coverage.** Every behaviour loss found in review becomes a probe, so every later run checks it.
-3. **Decision records.** `decisions/<repo>.yaml` records a person's choice, for example `D-orders-service-1: Ehcache 2 → Ehcache 3 via JCache`. It also lists the contract differences that choice allows. The next run applies the choice as a deterministic Change.
+3. **Decision records (§12.1).** `decisions/<repo>.yaml` records a person's choice, for example `D-orders-service-1: Ehcache 2 → Ehcache 3 via JCache`. It also lists the contract differences that choice allows. The next run applies the choice as a deterministic Change.
 4. **Corpus.** Every recorded proposal, recipe run and contract record is kept as a replay fixture.
 5. **Knowledge entries.** A lesson is one YAML entry plus a fixture; code changes only for a new kind of rule.
+
+### 12.1 How a person decides, and how the decision is applied
+
+A decision is chosen in the pull request, from options the pipeline wrote, and applied on the next run by the same machinery as everything else.
+
+**Choosing.** Each decision in the PR's "Decision needed" lists numbered options, written from the knowledge base (never by the AI):
+
+```
+K-PLATFORM-DROPPED: Ehcache 2
+  /decide ehcache jcache     Ehcache 3 via JCache (recommended): keeps the XML caches and their limits
+  /decide ehcache caffeine   Caffeine: a spec string per cache, no per-cache size limit
+  /decide ehcache manual     I will do it myself on this branch
+K-CONTRACT: trailing-slash URLs
+  /decide trailing-slash keep     Keep the old URLs working (explicit mappings)
+  /decide trailing-slash retire   Retire them: accept the 404s (you update the test)
+```
+
+The person replies with one comment, for example `/decide ehcache jcache`. A small workflow checks that the option exists and that the commenter has write access, writes `decisions/<repo>.yaml` (`D-<repo>-<n>`: who, when, which option, what it allows) and replies in the PR with what it recorded. A choice that is not one of the options is refused, with the list. The comment and the record are the audit trail. An organisation that wants more can require the record to arrive as a reviewed pull request on the state repository (§17.5); the file is the same.
+
+**Applying.** Each option is a playbook in the knowledge base with three parts:
+- **recipes:** deterministic changes (for example the `pom.xml` dependency swap);
+- **ports:** scoped port tasks (§4.1), each with files, evidence and obligations;
+- **allows:** contract items that may differ because of this choice.
+
+The next run reads the decision records, runs the playbook's recipes with the route, then works the playbook's ports through the same acceptance rules and contract gate as any port. **The decision record never marks a problem resolved.** It triggers a change, and the facts clear the problem or do not: the POM no longer declares Ehcache 2 (so `I-UNSUPPORTED-NEVER-SUCCEEDS` goes), the production profile starts, the test passes, the contract items are `same`. If a port is reverted, the decision stays open. Only `allows` writes anything into the contract, and only for the items the option names.
+
+| Choice | Recipes | Ports | Allows |
+|---|---|---|---|
+| `ehcache jcache` | swap `net.sf.ehcache:ehcache` for `org.ehcache:ehcache` (`jakarta`) and add `javax.cache:cache-api` | convert the Ehcache XML; `spring.cache.type: jcache`. Obligation: the recorded cache values (30s, 1000 entries) | nothing |
+| `trailing-slash keep` | none | add the slash variants to the controller mapping. Obligation: the trailing-slash items. The baseline's `POST /api/orders/` was already open to a VIEWER, so the PR says what keeping it keeps | nothing |
+| `trailing-slash retire` | none | none | the trailing-slash 404s. The test that asserts 200 still fails and only a person can edit it, so the PR says so |
+
+**Guardrails are narrowed, not removed.** The Ehcache port needs three things the general guardrails refuse. Each is allowed only for the files and keys the option names, and never for the AI in general:
+- changing an existing setting's value (`spring.cache.type`);
+- editing an `.xml` file (the cache configuration);
+- editing `pom.xml`, which only a recipe does.
 
 ## 13. Economy: the cost ladder
 

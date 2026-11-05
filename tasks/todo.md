@@ -461,11 +461,28 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
 - [ ] `digest` (`digest/1`, about 2 KB, the job summary's source), `explain`, `replay` (proposals and recipes, with a corpus of R14–R24 and expected verdicts), and `contract diff`.
 - Verify: golden digests for R14, R22, R23 and R24; corpus replay reproduces today's verdicts; the T3 recipe replays to R14's fix.
 
-### 8.8 Durable-fix loop and decision records (design §5, §12)
+### 8.8 Decision records (design §12.1)
+
+A person chooses in the PR; the next run applies the choice as recipes and scoped ports, and the facts clear the problem. The AI still writes the ports.
+
+- [ ] **1. Playbooks in the knowledge base** (`Config/knowledge/decisions.yaml`): for each decision subject (`ehcache`, `trailing-slash`), its options, each with a label, `recipes`, `ports` (mapping, files, obligations) and `allows` (contract item globs). Validated at start-up like the other files: ports name a real mapping, recipes exist, ids unique. `unsupported-libraries.yaml` keeps the manual steps; the options point at it.
+- [ ] **2. Options in the PR.** "Decision needed" lists numbered `/decide <subject> <option>` options for each decision, from the playbooks, with the recommended one first.
+- [ ] **3. `DecisionRecord` and the store.** `decisions/<repo>.yaml` (`D-<repo>-<n>`: subject, option, who, when). Parse, validate against the playbooks, and refuse unknown options.
+- [ ] **4. `decide` command and workflow.** A workflow on `issue_comment` (a PR comment starting `/decide`) checks that the commenter has write access, calls `decide`, commits the record and replies in the PR. It starts a refresh run. Needs a person to approve a new workflow trigger, so it is the last step.
+- [ ] **5. Apply decisions in the pipeline.**
+  - The coordinator reads the records and passes each chosen option's recipes to OpenRewrite with the route.
+  - Its ports join the port runner's tasks, scoped to the files the option names, with its obligations. Decision ports may do what the general guardrails refuse, only for the named files and keys: change a setting's value, edit `.xml`; `pom.xml` is changed by a recipe only.
+  - `allows` makes the named contract items *allowed*.
+- [ ] **6. Verdict.** Reasons already come from facts, so no change is needed to the rule. A decision that is recorded but not yet applied shows as "decided, awaiting the next run". A decision whose port was reverted stays open.
+- [ ] **7. Reporting.** The PR shows the decisions made, by whom, what each changed, and which ports implemented them. Reverted decision ports go back to "Decision needed" with the reason.
+- Verify:
+  - unit tests for the playbooks, the record, the options text and the guardrail narrowing (an edit outside the option's files is still rejected);
+  - a replay: with `D-orders-service-1` (`ehcache jcache`) the Ehcache problem leaves `NeedsDecision` only when the POM, the XML and the cache values are all right;
+  - CI run #28 with a recorded decision for each of T5 and T6: orders-service reaches `Succeeded` with the contract `same` or `allowed` (the last open demo criterion).
+
+### 8.8b Durable-fix loop (design §5, §12) *(after 8.8)*
 
 - [ ] When a person accepts a port in a PR, the AI drafts a recipe, mapping or signature from it; replay proves it; a person approves it in a commit with a fixture.
-- [ ] `decisions/<repo>.yaml` (`D-…`): the chosen replacement, the contract differences it allows, and who decided. The next run applies it as a deterministic change.
-- Verify: `D-orders-service-1` (Ehcache 3 via JCache) moves T6 from `NeedsDecision` to a deterministic change, with contract items `same` (cache 30s/1000).
 
 ### 8.9 Derived knowledge: the BOM comparison (design §9.3)
 
