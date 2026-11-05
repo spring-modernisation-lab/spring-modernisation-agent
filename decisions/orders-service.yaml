@@ -1,0 +1,6 @@
+decisions:
+  - id: D-orders-service-1
+    subject: trailing-slash
+    option: keep
+    by: John M Padgett
+    on: 2026-11-05
