@@ -463,22 +463,24 @@ The AI gets one **task** (a known API move, its files, its evidence, its obligat
 
 ### 8.8 Decision records (design §12.1)
 
-A person chooses in the PR; the next run applies the choice as recipes and scoped ports, and the facts clear the problem. The AI still writes the ports.
+A person commits `decisions/<repo>.yaml`; the next run applies the choice as a scoped port and the facts clear the problem. The AI still writes the port. There is no bot. Tests are never edited, so the Ehcache decision stays manual (design §12.1).
 
-- [ ] **1. Playbooks in the knowledge base** (`Config/knowledge/decisions.yaml`): for each decision subject (`ehcache`, `trailing-slash`), its options, each with a label, `recipes`, `ports` (mapping, files, obligations) and `allows` (contract item globs). Validated at start-up like the other files: ports name a real mapping, recipes exist, ids unique. `unsupported-libraries.yaml` keeps the manual steps; the options point at it.
-- [ ] **2. Options in the PR.** "Decision needed" lists numbered `/decide <subject> <option>` options for each decision, from the playbooks, with the recommended one first.
-- [ ] **3. `DecisionRecord` and the store.** `decisions/<repo>.yaml` (`D-<repo>-<n>`: subject, option, who, when). Parse, validate against the playbooks, and refuse unknown options.
-- [ ] **4. `decide` command and workflow.** A workflow on `issue_comment` (a PR comment starting `/decide`) checks that the commenter has write access, calls `decide`, commits the record and replies in the PR. It starts a refresh run. Needs a person to approve a new workflow trigger, so it is the last step.
-- [ ] **5. Apply decisions in the pipeline.**
-  - The coordinator reads the records and passes each chosen option's recipes to OpenRewrite with the route.
-  - Its ports join the port runner's tasks, scoped to the files the option names, with its obligations. Decision ports may do what the general guardrails refuse, only for the named files and keys: change a setting's value, edit `.xml`; `pom.xml` is changed by a recipe only.
-  - `allows` makes the named contract items *allowed*.
-- [ ] **6. Verdict.** Reasons already come from facts, so no change is needed to the rule. A decision that is recorded but not yet applied shows as "decided, awaiting the next run". A decision whose port was reverted stays open.
-- [ ] **7. Reporting.** The PR shows the decisions made, by whom, what each changed, and which ports implemented them. Reverted decision ports go back to "Decision needed" with the reason.
+Checked before this plan (in orders-service at `ce42258`): the Ehcache switch needs a test file converted (`ehcache-test.xml`) and the test's own annotation changed, so it cannot be applied under the no-test-edits rule. The behaviour probe also reads cache expiry and size from Ehcache 2 field names only, which would show JCache as "unavailable"; it is not needed while the Ehcache decision is manual.
+
+- [ ] **1. Playbooks** (`Config/knowledge/decisions.yaml`): subject `trailing-slash` with options `keep` (a port: file `OrderController.java`, evidence signature `S-HTTP-CONTRACT`, obligation globs `B-SEC-*` on the trailing-slash items) and `retire` (`allows` the trailing-slash 404s). Validated at start-up like the other knowledge files. The Ehcache subject lists only a "manual" option, which the PR points at `unsupported-libraries.yaml` for.
+- [ ] **2. `DecisionRecord` and loader.** `decisions/<repo>.yaml`: parse and validate against the playbooks; an unknown subject or option stops the run, naming the valid ones.
+- [ ] **3. Decision ports.**
+  - A decision's port becomes a `PortTask` with its own ID (`D-<repo>-<n>`), files from the option, and evidence from the problems the option names.
+  - Acceptance: that evidence is gone, nothing new fails, and its obligations are `same`. Behaviour signatures do not excuse a decision port's obligations.
+  - It runs through the port runner, after the API-move tasks, and is reverted like any port.
+- [ ] **4. Allowed differences.** `allows` marks the named contract items *allowed*, with the decision's ID, only for that option.
+- [ ] **5. Options in the PR.** "Decision needed" lists each decision's options with the exact line to commit, and the loophole note beside `keep`. A recorded decision shows as made, by whom, and whether its port was kept or reverted.
+- [ ] **6. Verdict.** No rule change: reasons already come from facts. A decision whose port was reverted stays open with the reason.
 - Verify:
-  - unit tests for the playbooks, the record, the options text and the guardrail narrowing (an edit outside the option's files is still rejected);
-  - a replay: with `D-orders-service-1` (`ehcache jcache`) the Ehcache problem leaves `NeedsDecision` only when the POM, the XML and the cache values are all right;
-  - CI run #28 with a recorded decision for each of T5 and T6: orders-service reaches `Succeeded` with the contract `same` or `allowed` (the last open demo criterion).
+  - unit tests for the playbooks, the loader, decision-port acceptance (a `keep` that leaves the 404s is rejected even though `BS-TRAILING-SLASH` explains them), `allows`, and the PR text;
+  - a replay on run 27's records: with `D-orders-service-1` (`trailing-slash: keep`) and a controller change that restores the paths, the trailing-slash items are `same` and K-CONTRACT clears; with the 404s left, the port is reverted;
+  - CI run #28 with `trailing-slash: keep` recorded: T5's test passes, orders-service is `NeedsDecision` for the Ehcache decision only, and the PR names the test file a person must convert.
+- Open: the demo criterion "a Succeeded repository matches its baseline contract" cannot be shown on orders-service while T6 needs a test edit, and platform-parent has no application to probe. Showing it needs a second demo service without T6, or a person converting the cache and the test by hand in `main`. Not part of 8.8.
 
 ### 8.8b Durable-fix loop (design §5, §12) *(after 8.8)*
 
