@@ -391,6 +391,8 @@ Two rules differ for a decision port, because the general ones would let it pass
 | `trailing-slash: keep` | `OrderController.java`: add the slash variant to the mapping. Obligation: the trailing-slash items equal the baseline. Evidence: the failing trailing-slash test | nothing |
 | `trailing-slash: retire` | none | the trailing-slash 404s. The test that asserts 200 still fails and only a person can edit it; the PR says so |
 
+**As built (8.8).** `Config/knowledge/decisions.yaml` holds the playbooks, `decisions/<repo>.yaml` the choices. A decision port's files are the production files that map the paths the baseline served with a trailing slash, and its obligations are those baseline items, so both come from facts about the repository, not from the playbook. The port runner works decision ports after the API moves, and the contract gate checks them like any other. The job summary, the PR and the console show what each decision did (applied, reverted, allows N differences, or why nothing was ported).
+
 **Keeping the URLs keeps the baseline's loophole.** On Boot 2.7, `POST /api/orders/` was open to a VIEWER, because the OPERATOR-only rule matched only `/api/orders`. Restoring the old behaviour exactly restores that, so the PR states it next to the `keep` option.
 
 **Tests are never edited.** The Ehcache decision cannot be applied by the pipeline. `InventoryCachingTests` names an Ehcache 2 file in its own annotation (`spring.cache.ehcache.config=classpath:ehcache-test.xml`), and converting that file or the annotation is a test edit. So `K-PLATFORM-DROPPED` always ends with a person following the manual steps, and a repository with it is `NeedsDecision` until they have. That is a deliberate limit, not a gap.

@@ -3,7 +3,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Publishing;
+using SpringModernisationAgent.Remediation;
 using SpringModernisationAgent.Transformation;
+using SpringModernisationAgent.Triage;
 
 namespace SpringModernisationAgent.Commands;
 
@@ -35,6 +37,9 @@ public sealed class PublishCommand
         var results = await new TransformationResultsReader().ReadAsync(
             Path.Combine(artifacts, "transformation-results.json"),
             cancellationToken);
+
+        var playbooks = ProblemKnowledge.LoadDefault(
+            UnsupportedLibraries.All.Select(library => library.Name).ToList()).Decisions;
 
         var analyses = await ReadAnalysesAsync(
             Path.Combine(artifacts, "migration-results-analysis.json"),
@@ -72,7 +77,8 @@ public sealed class PublishCommand
                 plan,
                 result,
                 flags,
-                analyses.GetValueOrDefault(repository));
+                analyses.GetValueOrDefault(repository),
+                playbooks: playbooks);
 
             if (content is null)
             {

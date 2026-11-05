@@ -103,6 +103,20 @@ public static class TransformationSummaryWriter
             }
         }
 
+        foreach (var result in results.Where(result => result.Decisions.Count > 0))
+        {
+            markdown.AppendLine();
+            markdown.AppendLine($"### {result.Transformation.RepositoryName}: decisions");
+            markdown.AppendLine();
+            markdown.AppendLine("| Decision | Subject | Option | By | What it did |");
+            markdown.AppendLine("|---|---|---|---|---|");
+
+            foreach (var decision in result.Decisions)
+            {
+                markdown.AppendLine(Row($"`{decision.Id}`", decision.Subject, decision.Option, decision.By, decision.Result));
+            }
+        }
+
         foreach (var result in results.Where(result => result.Problems.Count > 0))
         {
             AppendProblems(markdown, result.Transformation.RepositoryName, result.Problems);

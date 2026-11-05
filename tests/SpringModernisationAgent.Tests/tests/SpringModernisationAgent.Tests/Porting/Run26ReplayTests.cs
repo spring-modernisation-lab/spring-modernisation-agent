@@ -45,6 +45,49 @@ public class Run26ReplayTests
         Assert.Contains("B-BEAN-production-HttpClient.connectionTimeToLive", http.Unchecked);
     }
 
+    [Fact]
+    public void DecisionPort_Run26_TheSame404sThatExcuseSecurityAreBrokenForTheDecisionToKeepThePaths()
+    {
+        var baseline = Load("R26-behaviour-baseline.json");
+        var after = Load("R26-behaviour-after.json");
+        var directory = Directory.CreateTempSubdirectory("replay-").FullName;
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(directory, "src", "main", "java", "a"));
+            File.WriteAllText(Path.Combine(directory, "src", "main", "java", "a", "OrderController.java"), "@RequestMapping(\"/api/orders\")" + Environment.NewLine + "class OrderController {}" + Environment.NewLine);
+            var playbook = Knowledge.Decisions.Subject("trailing-slash")!;
+            var contract = new ClassifiedProblem("P2", ProblemKind.Contract, "a.OrderControllerTests.legacyClientsCanListOrdersUsingTrailingSlash", "S-HTTP-CONTRACT", null, null, null, ["e"]);
+            var decision = new DecisionRecord("D-orders-service-1", "trailing-slash", "keep", "a-person", "2026-11-05", playbook, playbook.Option("keep")!);
+
+            var task = Assert.Single(DecisionTasks.Plan([decision], baseline, directory, [contract]).Tasks);
+            var comparison = BehaviourContract.Compare(baseline, after);
+
+            // As run 26 ended: the four default-profile 404s, and production unreadable.
+            var broken = PortObligations.Check([task], baseline, comparison, Knowledge).Single();
+            Assert.Equal(
+                [
+                    "B-SEC-default-GET /api/orders/-OPERATOR",
+                    "B-SEC-default-GET /api/orders/-VIEWER",
+                    "B-SEC-default-POST /api/orders/-OPERATOR",
+                    "B-SEC-default-POST /api/orders/-VIEWER"
+                ],
+                broken.Broken.Select(difference => difference.Item));
+            Assert.Empty(broken.Explained);
+            Assert.NotEmpty(broken.Unchecked);
+
+            // A controller that maps both paths serves what the baseline served: the same records, with those four restored.
+            var restored = new BehaviourRecord(after.Schema, after.Repository, after.Commit,
+                after.Items.ToDictionary(item => item.Key, item => broken.Broken.Any(difference => difference.Item == item.Key) ? baseline.Items[item.Key] : item.Value));
+            var kept = PortObligations.Check([task], baseline, BehaviourContract.Compare(baseline, restored), Knowledge).Single();
+            Assert.True(kept.Holds);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static PortTask Task(
         string mapping,
         string file) =>

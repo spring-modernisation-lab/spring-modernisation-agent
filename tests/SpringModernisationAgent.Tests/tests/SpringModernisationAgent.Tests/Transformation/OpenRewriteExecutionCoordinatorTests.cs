@@ -728,6 +728,78 @@ public class OpenRewriteExecutionCoordinatorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RecordedDecisions_AreHandedToThePortsAndReported()
+    {
+        var root = CreateTemporaryDirectory();
+        Directory.CreateDirectory(Path.Combine(root, "decisions"));
+        File.WriteAllText(
+            Path.Combine(root, "decisions", "customer-service.yaml"),
+            DecisionsFile("keep", "    on: 2026-11-05\n"));
+        var ports = new FakePortRunner(RemediationOutcome.NeedsHumanDecision, passed: false);
+        var workspacePath = CreateTemporaryDirectory();
+
+        try
+        {
+            var result = await CreateCoordinator(
+                    CreateWorkspaceProvider(workspacePath),
+                    new FakeRepositoryWorkspaceCleaner(),
+                    mavenProcessRunner: new FakeMavenProcessRunner([new MavenProcessResult(1, "[ERROR] cannot find symbol", string.Empty)]),
+                    patchRecorder: new FakePatchRecorder(),
+                    ports: ports,
+                    problemKnowledge: ProblemKnowledge.LoadDefault(SpringModernisationAgent.Remediation.UnsupportedLibraries.All.Select(library => library.Name).ToList()),
+                    decisionsRoot: root)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan());
+
+            Assert.Equal("D-customer-service-1", Assert.Single(ports.Decisions).Id);
+            var outcome = Assert.Single(result.Decisions);
+            Assert.Equal(("trailing-slash", "keep", "a-person"), (outcome.Subject, outcome.Option, outcome.By));
+            Assert.Equal("recorded; its port has not run yet", outcome.Result);
+        }
+        finally
+        {
+            DeleteDirectory(workspacePath);
+            DeleteDirectory(root);
+        }
+    }
+
+    private static string DecisionsFile(
+        string option,
+        string extra) =>
+        "decisions:\n" +
+        "  - id: D-customer-service-1\n" +
+        "    subject: trailing-slash\n" +
+        $"    option: {option}\n" +
+        "    by: a-person\n" +
+        extra;
+
+    [Fact]
+    public async Task ExecuteAsync_AMistakeInTheDecisionsFile_StopsBeforeAnythingIsCloned()
+    {
+        var root = CreateTemporaryDirectory();
+        Directory.CreateDirectory(Path.Combine(root, "decisions"));
+        File.WriteAllText(
+            Path.Combine(root, "decisions", "customer-service.yaml"),
+            DecisionsFile("maybe", string.Empty));
+        var provider = new FakeWorkspaceProvider();
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateCoordinator(
+                    provider,
+                    new FakeRepositoryWorkspaceCleaner(),
+                    problemKnowledge: ProblemKnowledge.LoadDefault(SpringModernisationAgent.Remediation.UnsupportedLibraries.All.Select(library => library.Name).ToList()),
+                    decisionsRoot: root)
+                .ExecuteAsync("spring-modernisation-lab", CreateTransformationPlan()));
+
+            Assert.Contains("unknown option 'maybe' for trailing-slash (known: keep, retire)", exception.Message);
+        }
+        finally
+        {
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ValidationPasses_DoesNotRunRecipeDiscovery()
     {
         var discovery = new FakeRecipeDiscovery();
@@ -949,7 +1021,8 @@ public class OpenRewriteExecutionCoordinatorTests
         IPortRunner? ports = null,
         IRecipeDiscovery? recipeDiscovery = null,
         ProblemKnowledge? problemKnowledge = null,
-        SpringModernisationAgent.Behaviour.IBehaviourContractRecorder? behaviour = null)
+        SpringModernisationAgent.Behaviour.IBehaviourContractRecorder? behaviour = null,
+        string? decisionsRoot = null)
     {
         var executionPlanBuilder =
             new OpenRewriteExecutionPlanBuilder();
@@ -974,7 +1047,8 @@ public class OpenRewriteExecutionCoordinatorTests
             ports,
             recipeDiscovery: recipeDiscovery,
             problemKnowledge: problemKnowledge,
-            behaviour: behaviour);
+            behaviour: behaviour,
+            decisionsRoot: decisionsRoot);
     }
 
     private sealed class FakeRecipeDiscovery : IRecipeDiscovery
@@ -1218,6 +1292,8 @@ public class OpenRewriteExecutionCoordinatorTests
 
         public BehaviourReport? Baseline { get; private set; }
 
+        public IReadOnlyList<SpringModernisationAgent.Triage.DecisionRecord> Decisions { get; private set; } = [];
+
         public BehaviourReport? Behaviour { get; init; }
 
         public Task<PortRunResult> RunAsync(
@@ -1229,6 +1305,7 @@ public class OpenRewriteExecutionCoordinatorTests
             OpenRewritePatchPath = input.OpenRewritePatchPath;
             Validation = input.Validation;
             Baseline = input.Baseline;
+            Decisions = input.Decisions;
 
             var final = input.Validation with
             {

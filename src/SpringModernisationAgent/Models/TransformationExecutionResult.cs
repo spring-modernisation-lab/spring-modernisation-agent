@@ -64,6 +64,9 @@ public sealed record TransformationExecutionResult(
     /// </summary>
     public IReadOnlyList<SpringModernisationAgent.Triage.ClassifiedProblem> RemainingProblems { get; init; } = [];
 
+    /// <summary>A person's recorded decisions for this repository and what each did (docs/system-design.md §12.1).</summary>
+    public IReadOnlyList<SpringModernisationAgent.Porting.DecisionOutcome> Decisions { get; init; } = [];
+
     /// <summary>The behaviour contract; null when it was off or the repository can't be probed.</summary>
     public BehaviourReport? Behaviour { get; init; }
 }

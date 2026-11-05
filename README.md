@@ -99,7 +99,9 @@ flowchart TD
 | **Report** (`report`) | Writes the migration results document. | Deterministic, plus labelled AI analysis |
 | **Hand over** (`publish`, opt-in) | Writes a reviewer summary and opens or updates a **draft** pull request on `migration/spring-boot-3.5-java-21`. It never pushes to the default branch and never merges. | A person |
 
-Each repository ends in one of four states: **Succeeded**, **Needs decision**, **Failed** or **Not run**, decided by one function from facts and shown with its reasons (for example `I-UNSUPPORTED-NEVER-SUCCEEDS`, `K-CONTRACT`, `F-MAVEN`) in the job summary, the PR and the results document. Only *Succeeded* opens the next wave. A repository that still uses a library Spring Boot 3 dropped (for example Ehcache 2) is *Needs decision*, whatever Maven says.
+Each repository ends in one of four states: **Succeeded**, **Needs decision**, **Failed** or **Not run**, decided by one function from facts and shown with its reasons (for example `I-UNSUPPORTED-NEVER-SUCCEEDS`, `K-CONTRACT`, `F-MAVEN`) in the job summary, the PR and the results document. Only *Succeeded* opens the next wave.
+
+A person answers a decision by committing a short file, `decisions/<repo>.yaml` (for example `trailing-slash: keep`); the PR lists the options and the exact line to commit. The next run applies the choice as a scoped AI port, judged like any other, or as an allowed difference. The pipeline never edits tests, so a decision that needs a test change, such as Ehcache 2, stays a manual step. A repository that still uses a library Spring Boot 3 dropped (for example Ehcache 2) is *Needs decision*, whatever Maven says.
 
 ## Key findings (CI runs 11–27)
 

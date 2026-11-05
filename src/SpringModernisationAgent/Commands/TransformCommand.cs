@@ -407,7 +407,9 @@ public sealed class TransformCommand
                 progress,
                 recipeDiscovery,
                 knowledge,
-                behaviourContract);
+                behaviourContract,
+                // Decisions are read from the pipeline repository's checkout.
+                Environment.GetEnvironmentVariable("MIGRATION_DECISIONS_DIRECTORY") ?? Directory.GetCurrentDirectory());
 
         return new MigrationWaveExecutor(
             wavePlanner,

@@ -467,19 +467,17 @@ A person commits `decisions/<repo>.yaml`; the next run applies the choice as a s
 
 Checked before this plan (in orders-service at `ce42258`): the Ehcache switch needs a test file converted (`ehcache-test.xml`) and the test's own annotation changed, so it cannot be applied under the no-test-edits rule. The behaviour probe also reads cache expiry and size from Ehcache 2 field names only, which would show JCache as "unavailable"; it is not needed while the Ehcache decision is manual.
 
-- [ ] **1. Playbooks** (`Config/knowledge/decisions.yaml`): subject `trailing-slash` with options `keep` (a port: file `OrderController.java`, evidence signature `S-HTTP-CONTRACT`, obligation globs `B-SEC-*` on the trailing-slash items) and `retire` (`allows` the trailing-slash 404s). Validated at start-up like the other knowledge files. The Ehcache subject lists only a "manual" option, which the PR points at `unsupported-libraries.yaml` for.
-- [ ] **2. `DecisionRecord` and loader.** `decisions/<repo>.yaml`: parse and validate against the playbooks; an unknown subject or option stops the run, naming the valid ones.
-- [ ] **3. Decision ports.**
+- [x] **1. Playbooks** (`Config/knowledge/decisions.yaml`): subject `trailing-slash` with options `keep` (a port: file `OrderController.java`, evidence signature `S-HTTP-CONTRACT`, obligation globs `B-SEC-*` on the trailing-slash items) and `retire` (`allows` the trailing-slash 404s). Validated at start-up like the other knowledge files. The Ehcache subject lists only a "manual" option, which the PR points at `unsupported-libraries.yaml` for.
+- [x] **2. `DecisionRecord` and loader.** `decisions/<repo>.yaml`: parse and validate against the playbooks; an unknown subject or option stops the run, naming the valid ones.
+- [x] **3. Decision ports.** (`Porting/DecisionTasks`: files = the production files that map the paths the baseline served with a trailing slash; obligations = those baseline items; evidence = the problems answering `S-HTTP-CONTRACT`. `PortTask.EvidenceSignatures` and `ExcusePlatformChanges = false` make it judged by the failing test, with no platform excuse.)
   - A decision's port becomes a `PortTask` with its own ID (`D-<repo>-<n>`), files from the option, and evidence from the problems the option names.
   - Acceptance: that evidence is gone, nothing new fails, and its obligations are `same`. Behaviour signatures do not excuse a decision port's obligations.
   - It runs through the port runner, after the API-move tasks, and is reverted like any port.
-- [ ] **4. Allowed differences.** `allows` marks the named contract items *allowed*, with the decision's ID, only for that option.
-- [ ] **5. Options in the PR.** "Decision needed" lists each decision's options with the exact line to commit, and the loophole note beside `keep`. A recorded decision shows as made, by whom, and whether its port was kept or reverted.
-- [ ] **6. Verdict.** No rule change: reasons already come from facts. A decision whose port was reverted stays open with the reason.
-- Verify:
-  - unit tests for the playbooks, the loader, decision-port acceptance (a `keep` that leaves the 404s is rejected even though `BS-TRAILING-SLASH` explains them), `allows`, and the PR text;
-  - a replay on run 27's records: with `D-orders-service-1` (`trailing-slash: keep`) and a controller change that restores the paths, the trailing-slash items are `same` and K-CONTRACT clears; with the 404s left, the port is reverted;
-  - CI run #28 with `trailing-slash: keep` recorded: T5's test passes, orders-service is `NeedsDecision` for the Ehcache decision only, and the PR names the test file a person must convert.
+- [x] **4. Allowed differences.** (`DecisionAllowances.Apply`; the coordinator applies it to the final comparison. A decision about one behaviour never allows another.) `allows` marks the named contract items *allowed*, with the decision's ID, only for that option.
+- [x] **5. Options in the PR.** (Also in the job summary and the console: `DecisionOutcomes`.) "Decision needed" lists each decision's options with the exact line to commit, and the loophole note beside `keep`. A recorded decision shows as made, by whom, and whether its port was kept or reverted.
+- [x] **6. Verdict.** No rule change: reasons already come from facts. A decision whose port was reverted stays open with the reason.
+- Verified locally (729 tests): the playbooks, the loader, decision-port acceptance (a `keep` that leaves the 404s is reverted even though `BS-TRAILING-SLASH` explains them), `allows`, the PR text and the coordinator wiring. Replayed on run 26's real records: the four default-profile 404s that excuse the security port are *broken* for the decision port, and restoring them makes it hold.
+- To do: CI run #28 with `trailing-slash: keep` recorded: T5's test passes, orders-service is `NeedsDecision` for the Ehcache decision only, and the PR names the test file a person must convert.
 - Open: the demo criterion "a Succeeded repository matches its baseline contract" cannot be shown on orders-service while T6 needs a test edit, and platform-parent has no application to probe. Showing it needs a second demo service without T6, or a person converting the cache and the test by hand in `main`. Not part of 8.8.
 
 ### 8.8b Durable-fix loop (design §5, §12) *(after 8.8)*

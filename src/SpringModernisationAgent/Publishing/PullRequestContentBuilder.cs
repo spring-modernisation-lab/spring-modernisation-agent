@@ -3,6 +3,7 @@ using System.Text;
 using SpringModernisationAgent.Models;
 using SpringModernisationAgent.Remediation;
 using SpringModernisationAgent.Reporting;
+using SpringModernisationAgent.Triage;
 
 namespace SpringModernisationAgent.Publishing;
 
@@ -39,7 +40,8 @@ public static class PullRequestContentBuilder
         TransformationExecutionResult result,
         IReadOnlyList<ReviewFlag> flags,
         MigrationAnalysis? analysis,
-        UnsupportedLibraryCatalog? libraries = null)
+        UnsupportedLibraryCatalog? libraries = null,
+        DecisionPlaybooks? playbooks = null)
     {
         libraries ??= UnsupportedLibraries.Catalog;
 
@@ -74,6 +76,7 @@ public static class PullRequestContentBuilder
         if (needsDecision)
         {
             AppendDecision(body, result, libraries);
+            AppendDecisions(body, plan.RepositoryName, result, playbooks);
         }
 
         AppendUnsupportedLibraries(body, result, libraries);
@@ -185,6 +188,76 @@ public static class PullRequestContentBuilder
         }
 
         body.AppendLine();
+    }
+
+    /// <summary>
+    /// What a person has decided and what it did, and the options for each
+    /// open decision with the exact line to commit (docs/system-design.md
+    /// §12.1). The options are written from the knowledge base, not by the AI.
+    /// </summary>
+    private static void AppendDecisions(
+        StringBuilder body,
+        string repository,
+        TransformationExecutionResult result,
+        DecisionPlaybooks? playbooks)
+    {
+        if (result.Decisions.Count > 0)
+        {
+            body.AppendLine("### Decisions made");
+            body.AppendLine();
+
+            foreach (var decision in result.Decisions)
+            {
+                body.AppendLine($"- `{decision.Id}` {decision.Subject}: {decision.Option}, by {decision.By} on {decision.On}: {decision.Result}");
+            }
+
+            body.AppendLine();
+        }
+
+        var decided = result.Decisions.Select(decision => decision.Subject).ToHashSet(StringComparer.Ordinal);
+
+        var open = (playbooks?.Subjects ?? [])
+            .Where(subject => !decided.Contains(subject.Id)
+                              && result.RemainingProblems.Any(problem => problem.SignatureId == subject.Answers))
+            .ToList();
+
+        if (open.Count == 0)
+        {
+            return;
+        }
+
+        body.AppendLine("### Decisions you can record");
+        body.AppendLine();
+        body.AppendLine(
+            $"Choose by committing `decisions/{repository}.yaml` to the pipeline repository; the next run applies it. " +
+            "The pipeline never edits tests, so a choice that needs a test change is a manual step.");
+        body.AppendLine();
+
+        var next = result.Decisions.Count + 1;
+
+        foreach (var subject in open)
+        {
+            body.AppendLine($"**{subject.Title}** (answers `{subject.Answers}`):");
+            body.AppendLine();
+
+            foreach (var option in subject.Options)
+            {
+                var action = option.Manual ? "not applied by the pipeline" : option.Port is not null ? "applied by a scoped AI port" : "records the difference as allowed";
+                body.AppendLine($"- `{subject.Id}: {option.Id}`: {option.Label} ({action}).{(option.Note is null ? "" : " " + option.Note)}");
+            }
+
+            body.AppendLine();
+            body.AppendLine("```yaml");
+            body.AppendLine("decisions:");
+            body.AppendLine($"  - id: D-{repository}-{next}");
+            body.AppendLine($"    subject: {subject.Id}");
+            body.AppendLine($"    option: {subject.Options[0].Id}   # or: {string.Join(", ", subject.Options.Skip(1).Select(option => option.Id))}");
+            body.AppendLine("    by: <your name>");
+            body.AppendLine($"    on: {DateTime.UtcNow:yyyy-MM-dd}");
+            body.AppendLine("```");
+            body.AppendLine();
+            next++;
+        }
     }
 
     /// <summary>Fixed guidance from the unsupported-libraries catalogue: the same steps every run.</summary>

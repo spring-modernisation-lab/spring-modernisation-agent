@@ -21,6 +21,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     private readonly IRecipeDiscovery? _recipeDiscovery;
     private readonly ProblemKnowledge? _problemKnowledge;
     private readonly IBehaviourContractRecorder? _behaviour;
+    private readonly string? _decisionsRoot;
 
     public OpenRewriteExecutionCoordinator(
     IRepositoryWorkspaceProvider workspaceProvider,
@@ -33,7 +34,8 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     IMigrationProgress? progress = null,
     IRecipeDiscovery? recipeDiscovery = null,
     ProblemKnowledge? problemKnowledge = null,
-    IBehaviourContractRecorder? behaviour = null)
+    IBehaviourContractRecorder? behaviour = null,
+    string? decisionsRoot = null)
     {
         ArgumentNullException.ThrowIfNull(workspaceProvider);
         ArgumentNullException.ThrowIfNull(workspaceCleaner);
@@ -61,6 +63,9 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
 
         // Null means the behaviour contract is off for this run.
         _behaviour = behaviour;
+
+        // Where decisions/<repo>.yaml is read from; null means decisions are off.
+        _decisionsRoot = decisionsRoot;
     }
 
     private IReadOnlyList<ClassifiedProblem> Classify(
@@ -119,6 +124,11 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(organisation);
         ArgumentNullException.ThrowIfNull(transformationPlan);
+
+        // A mistake in a decision file stops the run before anything is cloned, naming the file.
+        var decisions = _decisionsRoot is null || _problemKnowledge is null
+            ? []
+            : DecisionRecords.Load(_decisionsRoot, transformationPlan.RepositoryName, _problemKnowledge.Decisions);
 
         RepositoryWorkspace? workspace = null;
         var repository = transformationPlan.RepositoryName;
@@ -251,7 +261,10 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                             validationResult,
                             problems,
                             unsupportedLibraries,
-                            behaviourBaseline),
+                            behaviourBaseline)
+                        {
+                            Decisions = decisions
+                        },
                         cancellationToken);
 
                     // Maven's last result is the authoritative outcome.
@@ -303,6 +316,11 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 };
             }
 
+            if (behaviour is not null && _problemKnowledge is not null)
+            {
+                behaviour = DecisionAllowances.Apply(behaviour, decisions, _problemKnowledge);
+            }
+
             var result = new TransformationExecutionResult(
                 Transformation: transformationResult,
                 Validation: validationResult)
@@ -313,6 +331,7 @@ public sealed class OpenRewriteExecutionCoordinator : IOpenRewriteExecutionCoord
                 UnsupportedLibraries = unsupportedLibraries,
                 RecipeDiscovery = recipeDiscovery,
                 Problems = problems,
+                Decisions = DecisionOutcomes.Of(decisions, remediation, behaviour),
                 RemainingProblems = validationResult.Passed ? [] : remaining,
                 Behaviour = behaviour
             };
