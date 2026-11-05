@@ -53,7 +53,8 @@ public static class PortAcceptance
         // The task's own area: its files, or its mapping (a port's follow-up errors keep it).
         var remaining = afterProblems
             .Where(problem => task.Files.Contains(problem.Subject, StringComparer.Ordinal)
-                              || string.Equals(problem.Mapping, task.Mapping.Id, StringComparison.Ordinal))
+                              || string.Equals(problem.Mapping, task.Mapping.Id, StringComparison.Ordinal)
+                              || (problem.SignatureId is not null && task.EvidenceSignatures.Contains(problem.SignatureId)))
             .ToList();
 
         // A new failure at the same check counts against the port when no
@@ -152,7 +153,7 @@ public static class PortObligations
                         continue;
                     }
 
-                    if (knowledge.Explain(difference) is { } signature)
+                    if (task.ExcusePlatformChanges && knowledge.Explain(difference) is { } signature)
                     {
                         explained.Add(new ExplainedDifference(difference, signature));
                     }

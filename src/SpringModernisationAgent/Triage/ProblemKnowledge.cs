@@ -100,6 +100,7 @@ public sealed partial class ProblemKnowledge
     public const string SignaturesRelativePath = "Config/knowledge/diagnostic-signatures.yaml";
     public const string MappingsRelativePath = "Config/knowledge/api-mappings.yaml";
     public const string BehaviourSignaturesRelativePath = "Config/knowledge/behaviour-signatures.yaml";
+    public const string DecisionsRelativePath = "Config/knowledge/decisions.yaml";
 
     private static readonly Dictionary<string, ProblemKind> Kinds = new(StringComparer.Ordinal)
     {
@@ -113,12 +114,17 @@ public sealed partial class ProblemKnowledge
     public ProblemKnowledge(
         IReadOnlyList<DiagnosticSignature> signatures,
         IReadOnlyDictionary<string, ApiMapping> mappings,
-        IReadOnlyList<BehaviourSignature>? behaviourSignatures = null)
+        IReadOnlyList<BehaviourSignature>? behaviourSignatures = null,
+        DecisionPlaybooks? decisions = null)
     {
         Signatures = signatures;
         Mappings = mappings;
         BehaviourSignatures = behaviourSignatures ?? [];
+        Decisions = decisions ?? new DecisionPlaybooks([]);
     }
+
+    /// <summary>What a person can choose, and what each choice does.</summary>
+    public DecisionPlaybooks Decisions { get; }
 
     public IReadOnlyList<DiagnosticSignature> Signatures { get; }
 
@@ -152,13 +158,15 @@ public sealed partial class ProblemKnowledge
             : [];
 
         var behaviour = Path.Combine(root, BehaviourSignaturesRelativePath);
+        var decisions = Path.Combine(root, DecisionsRelativePath);
 
         return Parse(
             File.ReadAllText(Path.Combine(root, SignaturesRelativePath)),
             File.ReadAllText(Path.Combine(root, MappingsRelativePath)),
             knownLibraries,
             knownRecipes,
-            File.Exists(behaviour) ? File.ReadAllText(behaviour) : null);
+            File.Exists(behaviour) ? File.ReadAllText(behaviour) : null,
+            File.Exists(decisions) ? File.ReadAllText(decisions) : null);
     }
 
     [GeneratedRegex(@"(?m)^name:\s*(\S+)\s*$")]
@@ -167,12 +175,14 @@ public sealed partial class ProblemKnowledge
     /// <param name="knownLibraries">Library names in the unsupported-libraries catalogue.</param>
     /// <param name="knownRecipes">Recipe names a mechanical signature may name (the pipeline recipes).</param>
     /// <param name="behaviourYaml">The behaviour signatures, if any.</param>
+    /// <param name="decisionsYaml">The decision playbooks, if any.</param>
     public static ProblemKnowledge Parse(
         string signaturesYaml,
         string mappingsYaml,
         IReadOnlyCollection<string> knownLibraries,
         IReadOnlyCollection<string> knownRecipes,
-        string? behaviourYaml = null)
+        string? behaviourYaml = null,
+        string? decisionsYaml = null)
     {
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
@@ -223,7 +233,73 @@ public sealed partial class ProblemKnowledge
                 entry.Id!, kind, entry.Mapping, entry.Recipe, entry.Library, entry.Contains ?? [], patterns));
         }
 
-        return new ProblemKnowledge(signatures, mappings, ParseBehaviour(deserializer, behaviourYaml));
+        var behaviourSignatures = ParseBehaviour(deserializer, behaviourYaml);
+
+        return new ProblemKnowledge(
+            signatures,
+            mappings,
+            behaviourSignatures,
+            ParseDecisions(deserializer, decisionsYaml, signatures.Select(signature => signature.Id).ToHashSet(), behaviourSignatures.Select(signature => signature.Id).ToHashSet()));
+    }
+
+    private static DecisionPlaybooks ParseDecisions(
+        IDeserializer deserializer,
+        string? yaml,
+        IReadOnlySet<string> signatureIds,
+        IReadOnlySet<string> behaviourSignatureIds)
+    {
+        var subjects = new List<DecisionSubject>();
+
+        if (yaml is null)
+        {
+            return new DecisionPlaybooks(subjects);
+        }
+
+        var file = Read<DecisionsFile>(deserializer, yaml, "decisions.yaml");
+
+        foreach (var (entry, index) in (file?.Subjects ?? []).Select((entry, index) => (entry, index + 1)))
+        {
+            var label = $"decisions.yaml: subject {index} ('{entry.Id ?? "?"}')";
+
+            Require(!string.IsNullOrWhiteSpace(entry.Id), label, "needs an id");
+            Require(subjects.All(subject => subject.Id != entry.Id), label, "duplicates another subject's id");
+            Require(!string.IsNullOrWhiteSpace(entry.Title), label, "needs a title");
+            Require(entry.Answers is not null && signatureIds.Contains(entry.Answers), label,
+                "answers a signature that is not in diagnostic-signatures.yaml");
+            Require(entry.Options is { Count: > 0 }, label, "needs at least one option");
+
+            var options = new List<DecisionOption>();
+
+            foreach (var option in entry.Options!)
+            {
+                var optionLabel = $"{label}, option '{option.Id ?? "?"}'";
+
+                Require(!string.IsNullOrWhiteSpace(option.Id), label, "has an option with no id");
+                Require(options.All(existing => existing.Id != option.Id), optionLabel, "duplicates another option's id");
+                Require(!string.IsNullOrWhiteSpace(option.Label), optionLabel, "needs a label");
+                Require(option.Port is not null || option.Allows is not null || option.Manual, optionLabel, "needs a port, allows or manual");
+                Require(option.Allows is null || behaviourSignatureIds.Contains(option.Allows), optionLabel,
+                    "allows a behaviour signature that is not in behaviour-signatures.yaml");
+
+                DecisionPort? port = null;
+
+                if (option.Port is { } entryPort)
+                {
+                    Require(!string.IsNullOrWhiteSpace(entryPort.Name), optionLabel, "port needs a name");
+                    Require(entryPort.Scope is not null && DecisionPlaybooks.KnownScopes.Contains(entryPort.Scope), optionLabel,
+                        $"has an unknown scope (known: {string.Join(", ", DecisionPlaybooks.KnownScopes)})");
+                    Require(entryPort.Notes is { Count: > 0 }, optionLabel, "port needs at least one note");
+
+                    port = new DecisionPort(entryPort.Name!, entryPort.Scope!, entryPort.Notes!, entryPort.MustKeep ?? []);
+                }
+
+                options.Add(new DecisionOption(option.Id!, option.Label!, option.Note, port, option.Allows, option.Manual));
+            }
+
+            subjects.Add(new DecisionSubject(entry.Id!, entry.Title!, entry.Answers!, options));
+        }
+
+        return new DecisionPlaybooks(subjects);
     }
 
     private static List<BehaviourSignature> ParseBehaviour(
@@ -342,6 +418,48 @@ public sealed partial class ProblemKnowledge
         public List<string>? MustKeep { get; set; }
 
         public List<string>? Obligations { get; set; }
+    }
+
+    private sealed class DecisionsFile
+    {
+        public List<DecisionSubjectEntry>? Subjects { get; set; }
+    }
+
+    private sealed class DecisionSubjectEntry
+    {
+        public string? Id { get; set; }
+
+        public string? Title { get; set; }
+
+        public string? Answers { get; set; }
+
+        public List<DecisionOptionEntry>? Options { get; set; }
+    }
+
+    private sealed class DecisionOptionEntry
+    {
+        public string? Id { get; set; }
+
+        public string? Label { get; set; }
+
+        public string? Note { get; set; }
+
+        public DecisionPortEntry? Port { get; set; }
+
+        public string? Allows { get; set; }
+
+        public bool Manual { get; set; }
+    }
+
+    private sealed class DecisionPortEntry
+    {
+        public string? Name { get; set; }
+
+        public string? Scope { get; set; }
+
+        public List<string>? Notes { get; set; }
+
+        public List<string>? MustKeep { get; set; }
     }
 
     private sealed class BehaviourSignaturesFile

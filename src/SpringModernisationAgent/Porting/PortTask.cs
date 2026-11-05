@@ -16,6 +16,20 @@ public sealed record PortTask(
     IReadOnlyList<ClassifiedProblem> Problems,
     IReadOnlyList<string> Evidence)
 {
+    /// <summary>
+    /// Signatures of problems this task answers wherever they fail. A
+    /// decision port (docs/system-design.md §12.1) is judged by these, because
+    /// the failing test has no mapping and is not in the port's files.
+    /// </summary>
+    public IReadOnlyList<string> EvidenceSignatures { get; init; } = [];
+
+    /// <summary>
+    /// Whether a behaviour signature may excuse a change in this task's
+    /// obligations. True for a port (the platform did it); false for a
+    /// decision port, which exists to undo exactly that change.
+    /// </summary>
+    public bool ExcusePlatformChanges { get; init; } = true;
+
     /// <summary>The task's ID: its mapping's, since there is one task per mapping.</summary>
     public string Id => Mapping.Id;
 

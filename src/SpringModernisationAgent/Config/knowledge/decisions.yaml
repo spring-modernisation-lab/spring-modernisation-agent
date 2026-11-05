@@ -1,0 +1,60 @@
+# What a person can choose, and what each choice does (docs/system-design.md §12.1).
+#
+# A person records a choice by committing decisions/<repo>.yaml:
+#
+#   decisions:
+#     - id: D-orders-service-1
+#       subject: trailing-slash
+#       option: keep
+#       by: a-person
+#       on: 2026-11-05
+#
+# The next run applies it. A decision never marks a problem resolved: its
+# port is a scoped AI port judged like any other (its evidence is gone,
+# nothing new fails, its obligations hold), and the facts clear the problem
+# or they do not.
+#
+# Fields:
+#   subject.answers   the diagnostic signature of the problem it answers
+#   option.port       a scoped AI port: a name, a scope (how its files and
+#                     obligations are found, from facts), notes for the AI
+#                     and what it must keep
+#   option.allows     a behaviour signature: the differences it matches are
+#                     allowed by this decision
+#   option.manual     the pipeline does not apply it; the PR points at the
+#                     manual steps
+#   option.note       shown next to the option in the PR
+#
+# Tests are never edited, so a choice that needs a test change is manual.
+
+subjects:
+  - id: trailing-slash
+    title: "Trailing-slash URLs"
+    answers: S-HTTP-CONTRACT
+    options:
+      - id: keep
+        label: "Keep the old URLs working (an explicit mapping)"
+        note: "This restores the baseline exactly, including its loophole: on Boot 2.7, `POST /api/orders/` was open to a VIEWER, because the OPERATOR-only rule matched only `/api/orders`. Close that separately if it matters."
+        port:
+          name: "Keep trailing-slash URLs"
+          scope: trailing-slash-mappings
+          notes:
+            - "Spring Framework 6 no longer matches `/api/orders/` to a mapping declared as `/api/orders`."
+            - "Declare both on the controller's mapping, for example `@RequestMapping({\"/api/orders\", \"/api/orders/\"})`."
+            - "Change only the mapping. Do not change security rules, return values or any other behaviour."
+          mustKeep:
+            - "the status every user gets for every trailing-slash path, as on Boot 2.7"
+            - "the paths without a trailing slash, unchanged"
+      - id: retire
+        label: "Retire them: accept the 404s (a person updates the test)"
+        note: "The test that asserts 200 for the trailing-slash path still fails: tests are never edited by the pipeline."
+        allows: BS-TRAILING-SLASH
+
+  - id: ehcache
+    title: "Ehcache 2"
+    answers: S-EHCACHE-2
+    options:
+      - id: manual
+        label: "Follow the manual steps below"
+        note: "Not applied by the pipeline: the cache test names an Ehcache 2 file in its own annotation, and converting it is a test edit."
+        manual: true
