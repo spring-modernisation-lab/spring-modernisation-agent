@@ -4,6 +4,18 @@ AI-assisted migration of a Spring estate from Spring Boot 2.7 / Java 11 to Sprin
 
 > **Deterministic tools make the changes they reliably can; a bounded AI ports what is left, one problem at a time, against a behaviour contract recorded on the baseline; facts decide what needs a person; and Maven plus that contract decide what works.**
 
+## Aim of the prototype
+
+To show, end to end on a small demo estate, **where AI adds real value in a framework upgrade, and where it must not be trusted to decide**. It tests five things:
+
+1. Deterministic tools (assessment rules, OpenRewrite) can do the mechanical majority and say where they stop.
+2. A bounded AI can handle the long tail, one scoped task at a time, if it is kept only when its errors are gone, nothing new fails and the behaviour recorded on Boot 2.7 is unchanged.
+3. Facts, Maven and the recorded behaviour, not the AI, decide whether a migration worked, so a green build that lost behaviour is caught.
+4. What only a person can decide (a dropped library, a business choice) is reported clearly and handed over as a draft pull request, never worked around and never merged automatically.
+5. The output can be read by people, not just machines: a strategy document, a results document, a job summary and a PR, each built from recorded facts, with every outcome shown with its reason and any AI explanation labelled as such.
+
+It is a prototype, not a product: multi-wave hand-off, a durable run store, parallel execution and a production portal are out of scope (see [`tasks/todo.md`](tasks/todo.md)).
+
 **Status:** the pipeline below is built and proven in CI (runs 11–26). The open "make Maven green" loop kept finding new workarounds, so it has been replaced (Phase 8) by a behaviour contract recorded on the baseline (proven in run 26), problems classified by kind, and scoped AI ports that are kept only if they keep their behaviour. Durable fixes are next. See [`docs/system-design.md`](docs/system-design.md) §2–§5.
 
 ## Where to start
