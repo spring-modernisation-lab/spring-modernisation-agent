@@ -103,7 +103,22 @@ Each repository ends in one of four states: **Succeeded**, **Needs decision**, *
 
 A person answers a decision by committing a short file, `decisions/<repo>.yaml` (for example `trailing-slash: keep`); the PR lists the options and the exact line to commit. The next run applies the choice as a scoped AI port, judged like any other, or as an allowed difference. The pipeline never edits tests, so a decision that needs a test change, such as Ehcache 2, stays a manual step. A repository that still uses a library Spring Boot 3 dropped (for example Ehcache 2) is *Needs decision*, whatever Maven says.
 
-## Key findings (CI runs 11–27)
+## The approach in brief
+
+- **The problem.** Moving a Spring estate to Boot 3.5 / Java 21 is mostly mechanical, but not entirely. On the demo service OpenRewrite changed about 8 files and saved roughly 3 hours, then left 12 compile errors and two problems that only appear at runtime.
+- **A narrow AI.** It ports three known API moves (Security, Hibernate, HttpClient), one scoped task at a time, in only that task's files. It reads real library signatures, previews its edits and proposes. It cannot decide success, edit tests or touch the POM.
+- **Green is not the same as right.** Maven passed while the HTTP connection time-to-live was dropped (three runs) and while a `VIEWER` could `POST /api/orders/`. The behaviour contract, recorded on Boot 2.7 before anything changes, caught both. It proves only what it records, and the PR says so.
+- **Knowing when not to automate.** Ehcache 2 is dropped by Spring Boot 3, so the AI is never allowed to work around it and the repository can never be *Succeeded*. The trailing-slash change is a business choice, so a person decides it.
+- **Trust.** Every outcome has a reason code. Each guardrail was checked by replaying real AI proposals from past runs. Every AI patch is attributed and reviewable, and a reverted attempt is shown, not hidden.
+- **Rollout.** Waves gate on releases (a parent's new version must exist before its services move). Migration branches are regenerated, not hand-maintained, so feature work carries on. Effort is sized from facts, and a person owns the merge, the release and retiring the old line. Persisting waves across runs is designed but not yet built.
+
+**Likely questions**
+
+- *Why a small model?* A scoped task plus checks mattered more than model size. A larger model is worth comparing only if one fails a port.
+- *Could this run on .NET WebForms?* The architecture carries over, but that is a rewrite, not an upgrade, with a different toolset.
+- *What if test coverage is weak?* The behaviour contract adds coverage; characterisation tests are a planned extension.
+
+## Key findings (CI runs 11–28)
 
 The demo repository, `orders-service`, has six seeded traps (T1–T6, catalogued in [`tasks/demo-traps.md`](tasks/demo-traps.md)).
 
@@ -128,6 +143,7 @@ A green build also hid real losses: in run 14, a `POST` to `/api/orders/` (trail
 **5. Recording the behaviour, then giving the AI one scoped task at a time, worked.** The redesign (Phase 8) records what the Boot 2.7 application does before anything changes: whether it starts, who may call each endpoint, settings, HTTP client and cache values. Then each known API move becomes one task with its files, its errors and the behaviour it must keep.
 - **Run 26 (the old loop, the new contract):** the contract caught the HTTP connection time-to-live dropped for the third time, which Maven and the tests could not see.
 - **Run 27 (scoped ports):** all three ports (security, Hibernate, HttpClient) were accepted on the first attempt, each changing only its own files. The time-to-live was kept, and the contract confirmed it. The H2 console stayed exempt from security. The two remaining failures were exactly the two decisions, Ehcache 2 and the trailing slash, and neither reached the AI. It was also the cheapest run so far: 3 AI calls and 108k input tokens, against 170k in run 24.
+- **Run 28 (the first recorded decision):** `trailing-slash: keep` was committed as `D-orders-service-1`. The next run applied it as a fourth scoped AI port, a 2-line change to `OrderController` mapping both `/api/orders` and `/api/orders/`, and it was accepted. All four ports were accepted, using 95k input tokens (lower than run 27). The outcome stayed *Needs decision* for Ehcache 2 only (`I-UNSUPPORTED-NEVER-SUCCEEDS`): the cache test fails with `No bean named 'cacheManager'`, and the pipeline never edits tests or the POM. The contract showed 1 difference (the `production` context no longer starts, for the same Ehcache reason), and 36 behaviours could not be checked because of it. The PR lists the decision under "Decisions made" and gives the exact YAML for the Ehcache decision. One wrinkle: its "Decision needed" list still names the trailing-slash test even though that decision was applied.
 
 **5. Recurring AI fixes should become recipes, but only after measuring them.** The AI fixed T3 (`javax.servlet` names in strings) by hand in four runs and broke it in a fifth. An OpenRewrite recipe now does it deterministically, producing a file byte-identical to the AI's correct fixes. Recipe discovery then found an existing recipe for T1 (`MigrateUserType`), but measuring it showed it fixes 3 errors and introduces 4. A recipe that looks like a perfect match still has to be measured.
 
